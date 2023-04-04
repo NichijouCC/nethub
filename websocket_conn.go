@@ -1,0 +1,177 @@
+package nethub
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
+	"go.uber.org/zap"
+	"log"
+	"net"
+	"sync"
+	"sync/atomic"
+	"time"
+)
+
+func DialWebsocket(addr string) (*WebsocketConn, error) {
+	conn, _, err := websocket.DefaultDialer.Dial(addr, nil)
+	if err != nil {
+		return nil, err
+	}
+	return NewWebsocketConn(conn), nil
+}
+
+type WebsocketConn struct {
+	ctx      context.Context
+	cancel   context.CancelFunc
+	id       string
+	sendChan chan []byte
+	sync.RWMutex
+	isClosed bool
+	auth     interface{}
+
+	OnMessage    *EventTarget
+	OnError      *EventTarget
+	OnDisconnect *EventTarget
+	Conn         *websocket.Conn
+	properties   sync.Map
+}
+
+func (t *WebsocketConn) GetProperty(property string) (interface{}, bool) {
+	return t.properties.Load(property)
+}
+
+func (t *WebsocketConn) SetProperty(property string, value interface{}) {
+	t.properties.Store(property, value)
+}
+
+func (t *WebsocketConn) RemoteAddr() net.Addr {
+	return t.Conn.RemoteAddr()
+}
+
+func (t *WebsocketConn) GetAuth() interface{} {
+	return t.auth
+}
+
+func NewWebsocketConn(conn *websocket.Conn) *WebsocketConn {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &WebsocketConn{
+		Conn:         conn,
+		ctx:          ctx,
+		sendChan:     make(chan []byte, 10000),
+		isClosed:     false,
+		cancel:       cancel,
+		id:           uuid.New().String(),
+		OnMessage:    newEventTarget(),
+		OnDisconnect: newEventTarget(),
+		OnError:      newEventTarget(),
+	}
+}
+
+var WsWritePkts uint64
+var WsWriteByte uint64
+
+func (t *WebsocketConn) StartReadWrite() {
+	go func() { //接收数据
+		defer t.Close()
+		t.Conn.SetReadDeadline(time.Now().Add(pongWait))
+		t.Conn.SetPongHandler(func(appData string) error {
+			t.Conn.SetReadDeadline(time.Now().Add(pongWait))
+			return nil
+		})
+		for {
+			select {
+			case <-t.ctx.Done():
+				return
+			default:
+				msg, err := t.readOnePacket()
+				if err != nil {
+					if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+						log.Printf("websocket server read error: %v", err)
+						t.OnError.RiseEvent(err)
+					}
+					return
+				}
+				t.OnMessage.RiseEvent(msg)
+			}
+		}
+	}()
+
+	go func() { //发送数据
+		defer t.Close()
+		ticker := time.NewTicker(pingInterval)
+		for {
+			select {
+			case <-t.ctx.Done():
+				return
+			case data := <-t.sendChan:
+				if err := t.writeOnePacket(data); err != nil {
+					log.Println(fmt.Sprintf(`websocket write error:%v`, err.Error()))
+					t.OnError.RiseEvent(err)
+					return
+				}
+			case <-ticker.C:
+				t.Conn.SetWriteDeadline(time.Now().Add(writeWait))
+				if err := t.Conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
+					log.Println(fmt.Sprintf(`websocket write ping error:%v`, err.Error()))
+					return
+				}
+			}
+		}
+	}()
+}
+
+func (t *WebsocketConn) writeOnePacket(msg []byte) error {
+	atomic.AddUint64(&WsWriteByte, uint64(len(msg)))
+	atomic.AddUint64(&WsWritePkts, 1)
+	t.Conn.SetWriteDeadline(time.Now().Add(writeWait))
+	return t.Conn.WriteMessage(1, msg)
+}
+
+func (t *WebsocketConn) readOnePacket() ([]byte, error) {
+	_, data, err := t.Conn.ReadMessage()
+	return data, err
+}
+
+func (t *WebsocketConn) SendMessage(message []byte) error {
+	select {
+	case <-t.ctx.Done():
+		return errors.New("ws connection closed when send buff msg")
+	case t.sendChan <- message:
+		return nil
+	default: //队列满了丢弃消息
+		logger.Warn("ws发送队列满了丢弃消息", zap.String("addr", t.RemoteAddr().String()))
+		return nil
+	}
+}
+
+func (t *WebsocketConn) SendMessageDirect(msg []byte) error {
+	return t.writeOnePacket(msg)
+}
+
+func (t *WebsocketConn) ListenToOnDisconnect(listener func(data interface{})) {
+	t.OnDisconnect.AddEventListener(listener)
+}
+
+func (t *WebsocketConn) ListenToOnMessage(listener func(data interface{})) {
+	t.OnMessage.AddEventListener(listener)
+}
+
+func (t *WebsocketConn) Close() {
+	t.Lock()
+	defer t.Unlock()
+	if t.isClosed {
+		return
+	}
+	t.isClosed = true
+	t.cancel()
+	t.OnDisconnect.RiseEvent(nil)
+	t.Conn.Close()
+}
+
+func (t *WebsocketConn) IsClosed() bool {
+	t.RLock()
+	defer t.RUnlock()
+	return t.isClosed
+}
