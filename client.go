@@ -32,12 +32,13 @@ type Client struct {
 	OnLogin            *EventTarget
 	OnDisconnect       *EventTarget
 	OnHeartbeatTimeout *EventTarget
-	IsClosed           atomic.Bool
+	isClosed           atomic.Bool
 	lastMessageTime    atomic.Value
 
 	enqueueCh     chan *Packet
 	packetHandler map[PacketTypeCode]func(pkt *Packet)
 
+	*handlerMgr
 	//正在处理的request,struct{}
 	handlingReq sync.Map
 	//等待Response回复,*flyPacket
@@ -45,15 +46,8 @@ type Client struct {
 	//等待Ack回复,*flyPacket
 	pendingAck sync.Map
 
-	defaultHandler func(pkt *Packet) (interface{}, error)
-	handlers       map[string]func(pkt *Packet) (interface{}, error)
-	handlerMtx     sync.RWMutex
-
-	//正在处理的stream,struct{}
-	handlingStream       sync.Map
-	streamHandlers       map[string]streamHandler
-	streamHandlerMtx     sync.RWMutex
-	defaultStreamHandler streamHandler
+	//正在处理的stream,*Stream
+	handlingStream sync.Map
 
 	properties sync.Map
 	*PubSub
@@ -70,10 +64,7 @@ func newClient(clientId string, conn IConn, opts *ClientOptions) *Client {
 		lastMessageTime: atomic.Value{},
 		packetHandler:   map[PacketTypeCode]func(pkt *Packet){},
 		enqueueCh:       make(chan *Packet, maxQueueSize),
-		handlingReq:     sync.Map{},
-		handlers:        map[string]func(pkt *Packet) (interface{}, error){},
-		defaultHandler:  func(pkt *Packet) (interface{}, error) { return nil, nil },
-		streamHandlers:  map[string]streamHandler{},
+		handlerMgr:      &handlerMgr{},
 		PubSub:          newPubSub(),
 		options:         opts,
 	}
@@ -118,7 +109,7 @@ func newClient(clientId string, conn IConn, opts *ClientOptions) *Client {
 func (m *Client) LoopCheckAlive() {
 	ticker := time.NewTicker(time.Second)
 	for range ticker.C {
-		if m.IsClosed.Load() {
+		if m.isClosed.Load() {
 			continue
 		}
 		if time.Now().Sub(m.lastMessageTime.Load().(time.Time)) > time.Millisecond*time.Duration(m.options.HeartbeatTimeout*1000*0.3) {
@@ -131,22 +122,6 @@ func (m *Client) LoopCheckAlive() {
 			m.Close()
 		}
 	}
-}
-
-func (m *Client) RegisterHandler(method string, handle func(pkt *Packet) (interface{}, error)) {
-	m.handlerMtx.Lock()
-	defer m.handlerMtx.Unlock()
-	m.handlers[method] = handle
-}
-
-func (m *Client) findHandler(methode string) func(pkt *Packet) (interface{}, error) {
-	m.handlerMtx.RLock()
-	defer m.handlerMtx.RUnlock()
-	handler := m.handlers[methode]
-	if handler == nil {
-		handler = m.defaultHandler
-	}
-	return handler
 }
 
 func (m *Client) GetProperty(property string) (interface{}, bool) {
@@ -172,25 +147,31 @@ func (m *Client) onReceiveRequest(pkt *Packet) {
 		//如果还未处理则创建处理
 		if _, loaded := m.handlingReq.LoadOrStore(request.Id, struct{}{}); !loaded {
 			go func() {
-				//执行request
-				handler := m.findHandler(request.Method)
-				result, err := handler(pkt)
+				defer m.handlingReq.Delete(request.Id)
 				resp := &ResponsePacket{Id: request.Id}
-				if err != nil {
-					logger.Error("request执行出错", zap.Error(err))
-					resp.Error = err.Error()
+				//执行request
+				handler, ok := m.findRequestHandler(request.Method)
+				if !ok {
+					resp.Error = "无法找到对应方法"
 				} else {
-					resp.Result = result
+					result, err := handler(pkt)
+					if err != nil {
+						logger.Error("request执行出错", zap.Error(err))
+						resp.Error = err.Error()
+					} else {
+						resp.Result = result
+					}
 				}
-				err = m.SendPacketWithRetry(resp)
+				err := m.SendPacketWithRetry(resp)
 				if err != nil {
 					logger.Error("发送response出错", zap.Error(err))
 				}
-				m.handlingReq.Delete(request.Id)
 			}()
 		}
 	} else {
-		m.defaultHandler(pkt)
+		if handler, ok := m.findRequestHandler(request.Method); ok {
+			handler(pkt)
+		}
 	}
 }
 
@@ -276,22 +257,6 @@ func (m *Client) onReceiveBroadcast(pkt *Packet) {
 	}
 }
 
-func (m *Client) RegisterStreamHandler(method string, handle streamHandler) {
-	m.streamHandlerMtx.Lock()
-	defer m.streamHandlerMtx.Unlock()
-	m.streamHandlers[method] = handle
-}
-
-func (m *Client) findStreamHandler(methode string) streamHandler {
-	m.streamHandlerMtx.RLock()
-	defer m.streamHandlerMtx.RUnlock()
-	handler := m.streamHandlers[methode]
-	if handler == nil {
-		handler = m.defaultStreamHandler
-	}
-	return handler
-}
-
 func (m *Client) onReceiveStreamRequest(pkt *Packet) {
 	request := pkt.PacketContent.(*StreamRequestPacket)
 	if request.Id != "" {
@@ -305,8 +270,6 @@ func (m *Client) onReceiveStreamRequest(pkt *Packet) {
 	//如果还未建立stream则创建stream处理
 	if !loaded {
 		stream := value.(*Stream)
-		handler := m.findStreamHandler(request.Method)
-		handler(pkt, stream)
 		go func() {
 			//等待stream处理完毕
 			<-stream.CloseCh
@@ -323,6 +286,12 @@ func (m *Client) onReceiveStreamRequest(pkt *Packet) {
 				logger.Error("发送StreamClosePacket出错", zap.Error(err))
 			}
 		}()
+		handler, ok := m.findStreamHandler(request.Method)
+		if !ok {
+			stream.CloseWithError(errors.New("无法找到对应方法"))
+			return
+		}
+		handler(pkt, stream)
 	}
 	if value.(*Stream).OnRequest != nil {
 		value.(*Stream).OnRequest(request)
@@ -499,14 +468,18 @@ func (m *Client) SendPacket(packet INetPacket) error {
 }
 
 func (m *Client) Close() {
-	if m.IsClosed.Load() {
+	if m.isClosed.Load() {
 		return
 	}
-	m.IsClosed.Store(true)
+	m.isClosed.Store(true)
 	logger.Info("客户端断连", zap.String("clientId", m.ClientId))
 	m.OnDisconnect.RiseEvent(nil)
 	m.ClearAllSubTopics()
 	m.conn.Load().(IConn).Close()
+}
+
+func (m *Client) IsClosed() bool {
+	return m.isClosed.Load()
 }
 
 type flyPacket struct {
@@ -545,3 +518,4 @@ type LoginParams struct {
 }
 
 type streamHandler func(first *Packet, stream *Stream)
+type requestHandler func(pkt *Packet) (interface{}, error)

@@ -30,12 +30,7 @@ type Hub struct {
 	//bucketId->*NetBucket
 	buckets sync.Map
 	*Bucket
-	handlers   map[string]func(pkt *Packet) (interface{}, error)
-	handlerMtx sync.RWMutex
-
-	streamHandlers   map[string]streamHandler
-	streamHandlerMtx sync.RWMutex
-
+	*handlerMgr
 	//用于login认证
 	checkLogin func(params *LoginParams) bool
 	options    *HubOptions
@@ -43,10 +38,9 @@ type Hub struct {
 
 func New(options *HubOptions) *Hub {
 	r := &Hub{
-		handlers:       map[string]func(pkt *Packet) (interface{}, error){},
-		streamHandlers: map[string]streamHandler{},
-		Bucket:         newBucket(-1, nil),
-		options:        options,
+		Bucket:     newBucket(-1, nil),
+		handlerMgr: &handlerMgr{},
+		options:    options,
 	}
 
 	r.RegisterRequestHandler("login", func(pkt *Packet) (interface{}, error) {
@@ -59,22 +53,16 @@ func New(options *HubOptions) *Hub {
 		if err != nil {
 			return nil, errors.New("命令json解析出错")
 		}
-		r.handlerMtx.Lock()
-		defer r.handlerMtx.Unlock()
 		for _, s := range params.Method {
-			if _, ok := r.handlers[s]; !ok {
-				r.handlers[s] = func(pkt *Packet) (interface{}, error) {
-					req := pkt.PacketContent.(*RequestPacket)
-					if req.Id == "" {
-						pkt.Client.SendPacket(req)
-						return "成功", nil
-					} else {
-						return pkt.Client.RequestWithRetryByPacket(req)
-					}
+			r.RegisterRequestHandler(s, func(pkt *Packet) (interface{}, error) {
+				req := pkt.PacketContent.(*RequestPacket)
+				if req.Id == "" {
+					pkt.Client.SendPacket(req)
+					return "成功", nil
+				} else {
+					return pkt.Client.RequestWithRetryByPacket(req)
 				}
-			} else {
-				logger.Error(fmt.Sprintf("注册服务[%v]失败", s))
-			}
+			})
 		}
 		return "成功", nil
 	})
@@ -241,69 +229,40 @@ type HttpResp struct {
 	Message string      `json:"message,omitempty"`
 }
 
-func (n *Hub) RegisterRequestHandler(method string, handle func(pkt *Packet) (interface{}, error)) {
-	n.handlerMtx.Lock()
-	defer n.handlerMtx.Unlock()
-	n.handlers[method] = handle
-}
-
-func (n *Hub) findRequestHandler(methode string) func(pkt *Packet) (interface{}, error) {
-	n.handlerMtx.RLock()
-	defer n.handlerMtx.RUnlock()
-	return n.handlers[methode]
-}
-
 func (n *Hub) handleRequest(pkt *Packet) (interface{}, error) {
-	handler := n.findRequestHandler(pkt.PacketContent.(*RequestPacket).Method)
-	if handler == nil {
+	handler, ok := n.findRequestHandler(pkt.PacketContent.(*RequestPacket).Method)
+	if !ok {
 		return nil, errors.New("无法找到对应方法")
-	} else {
-		var executeErr error
-		var result interface{}
-		func() {
-			defer func() {
-				if err := recover(); err != nil {
-					executeErr = err.(error)
-					fmt.Println("rpc execute exception:", err)
-				}
-			}()
-			result, executeErr = handler(pkt)
-		}()
-		return result, executeErr
 	}
+	var executeErr error
+	var result interface{}
+	func() {
+		defer func() {
+			if err := recover(); err != nil {
+				executeErr = err.(error)
+				fmt.Println("rpc execute exception:", err)
+			}
+		}()
+		result, executeErr = handler(pkt)
+	}()
+	return result, executeErr
 }
 
 func (n *Hub) handleStream(first *Packet, stream *Stream) {
-	handler := n.findStreamHandler(first.PacketContent.(*StreamRequestPacket).Method)
-	if handler == nil {
+	handler, ok := n.findStreamHandler(first.PacketContent.(*StreamRequestPacket).Method)
+	if !ok {
 		stream.CloseWithError(errors.New("无法找到对应方法"))
 		return
-	} else {
-		func() {
-			defer func() {
-				if err := recover(); err != nil {
-					fmt.Println("rpc stream execute exception:", err)
-					if executeErr, ok := err.(error); ok {
-						stream.CloseWithError(executeErr)
-					}
-				}
-			}()
-			handler(first, stream)
-		}()
-		return
 	}
-}
-
-func (n *Hub) RegisterStreamHandler(method string, handle streamHandler) {
-	n.streamHandlerMtx.Lock()
-	defer n.streamHandlerMtx.Unlock()
-	n.streamHandlers[method] = handle
-}
-
-func (n *Hub) findStreamHandler(methode string) streamHandler {
-	n.streamHandlerMtx.RLock()
-	defer n.streamHandlerMtx.RUnlock()
-	return n.streamHandlers[methode]
+	func() {
+		defer func() {
+			if err := recover(); err != nil {
+				fmt.Println("stream execute exception:", err)
+				stream.CloseWithError(errors.New("服务内部执行异常"))
+			}
+		}()
+		handler(first, stream)
+	}()
 }
 
 // udp可以通过https安全的获得sessionId
@@ -393,8 +352,7 @@ func (n *Hub) createClient(conn IConn, data *sessionData) *Client {
 		})
 	}
 	client.sessionId = data.SessionId
-	client.defaultHandler = n.handleRequest
-	client.defaultStreamHandler = n.handleStream
+	client.handlerMgr = n.handlerMgr
 	n.clients.Store(data.ClientId, client)
 	n.usingSession.Store(data.SessionId, client)
 
