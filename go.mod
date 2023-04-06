@@ -1,4 +1,4 @@
-module github.com/NichijouCC/nethub.git
+module github.com/NichijouCC/nethub
 
 go 1.20
 
