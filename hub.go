@@ -233,42 +233,6 @@ type HttpResp struct {
 	Message string      `json:"message,omitempty"`
 }
 
-func (n *Hub) handleRequest(pkt *Packet) (interface{}, error) {
-	handler, ok := n.findRequestHandler(pkt.PacketContent.(*RequestRawPacket).Method)
-	if !ok {
-		return nil, errors.New("无法找到对应方法")
-	}
-	var executeErr error
-	var result interface{}
-	func() {
-		defer func() {
-			if err := recover(); err != nil {
-				executeErr = err.(error)
-				fmt.Println("rpc execute exception:", err)
-			}
-		}()
-		result, executeErr = handler(pkt)
-	}()
-	return result, executeErr
-}
-
-func (n *Hub) handleStream(first *Packet, stream *Stream) {
-	handler, ok := n.findStreamHandler(first.PacketContent.(*StreamRequestRawPacket).Method)
-	if !ok {
-		stream.CloseWithError(errors.New("无法找到对应方法"))
-		return
-	}
-	func() {
-		defer func() {
-			if err := recover(); err != nil {
-				fmt.Println("stream execute exception:", err)
-				stream.CloseWithError(errors.New("服务内部执行异常"))
-			}
-		}()
-		handler(first, stream)
-	}()
-}
-
 // udp可以通过https安全的获得sessionId
 func (n *Hub) httpLogin(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)

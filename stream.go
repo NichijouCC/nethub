@@ -6,38 +6,33 @@ import (
 )
 
 type Stream struct {
-	Id         string
-	client     *Client
-	OnRequest  func(pkt *StreamRequestRawPacket)
-	OnResponse func(pkt *StreamResponsePacket)
+	Id     string
+	client *Client
+	//OnRevRequest  chan *StreamRequestRawPacket
+	//OnRevResponse chan *StreamResponsePacket
+	////对面不再发数据
+	//OnRevClose chan *StreamClosePacket
+	OnRev chan INetPacket
 
-	isClosed bool
+	//自身不再发数据
+	closeSend bool
 	sync.Mutex
-	CloseCh chan struct{}
-	//异常关闭时，造成关闭的错误信息
-	CloseErr error
 }
 
 func newStream(id string, client *Client) *Stream {
-	s := &Stream{Id: id, client: client, CloseCh: make(chan struct{})}
+	s := &Stream{
+		Id:     id,
+		client: client,
+		//OnRevRequest:  make(chan *StreamRequestRawPacket, 1),
+		//OnRevResponse: make(chan *StreamResponsePacket, 1),
+		//OnRevClose:    make(chan *StreamClosePacket, 1),
+		OnRev: make(chan INetPacket, 10),
+	}
 	return s
 }
 
-// 正常关闭
-func (s *Stream) Close() {
-	s.CloseWithError(nil)
-}
-
-// 异常关闭
-func (s *Stream) CloseWithError(err error) {
-	s.Lock()
-	defer s.Unlock()
-	if s.isClosed {
-		return
-	}
-	s.CloseErr = err
-	s.isClosed = true
-	close(s.CloseCh)
+func (s *Stream) CloseAndRev() error {
+	return s.client.SendPacketWithRetry(&StreamClosePacket{Id: uuid.New().String(), StreamId: s.Id})
 }
 
 func (s *Stream) Request(params interface{}) error {

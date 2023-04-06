@@ -1,6 +1,11 @@
 package nethub
 
-import "testing"
+import (
+	"encoding/json"
+	"log"
+	"sync"
+	"testing"
+)
 
 func TestHub_ListenAndServe(t *testing.T) {
 	hub := New(&HubOptions{
@@ -38,19 +43,35 @@ func TestHub_RegisterStreamHandler(t *testing.T) {
 	})
 	hub.ListenAndServeTcp(":1235", 2)
 
-	hub.RegisterStreamHandler("add", func(first *Packet, stream *Stream) {
-		//初次触发,执行
-		stream.OnRequest = func(pkt *StreamRequestRawPacket) {
-			_ = pkt.Method
-			_ = pkt.Params
-			_ = pkt.Id
-			//持续处理客户端发来的流消息
-			//todo
-
-			//发送消息到客户端,举例
-			stream.RequestWithRetry("xx", nil)
-			//服务端可以主动关闭数据流,举例
-			stream.Close()
+	go hub.RegisterStreamHandler("add", func(first *Packet, stream *Stream) error {
+		var wait sync.WaitGroup
+	For:
+		for pkt := range stream.OnRev {
+			switch pkt.(type) {
+			case *StreamRequestRawPacket:
+				//处理服务端返回的回复
+				str, _ := json.Marshal(pkt.(*StreamRequestRawPacket))
+				log.Println("server receive req pkt", string(str))
+				//发送消息到客户端,举例
+				wait.Add(1)
+				go func() {
+					stream.RequestWithRetry("xx", nil)
+					wait.Done()
+				}()
+			case *StreamResponsePacket:
+				//处理服务端返回的回复
+				str, _ := json.Marshal(pkt.(*StreamResponsePacket))
+				log.Println("server receive resp pkt", string(str))
+			case *StreamClosePacket:
+				str, _ := json.Marshal(pkt.(*StreamClosePacket))
+				log.Println("server receive close pkt", string(str))
+				break For
+			}
 		}
+		wait.Wait()
+		log.Println("stream结束")
+		return nil
 	})
+
+	select {}
 }

@@ -154,7 +154,7 @@ func (m *Client) onReceiveRequest(pkt *Packet) {
 				if !ok {
 					resp.Error = "无法找到对应方法"
 				} else {
-					result, err := handler(pkt)
+					result, err := handler.execute(pkt)
 					if err != nil {
 						logger.Error("request执行出错", zap.Error(err))
 						resp.Error = err.Error()
@@ -263,48 +263,35 @@ func (m *Client) onReceiveStreamRequest(pkt *Packet) {
 		m.SendPacket(&AckPacket{Id: request.Id})
 	}
 	if value, loaded := m.handlingStream.Load(request.StreamId); loaded {
-		value.(*Stream).OnRequest(request)
+		value.(*Stream).OnRev <- request
+		return
+	}
+	handler, ok := m.findStreamHandler(request.Method)
+	if !ok {
+		closePkt := &StreamClosePacket{Id: uuid.New().String(), StreamId: request.Id, Error: "无法找到对应方法"}
+		go m.SendPacketWithRetry(closePkt)
 		return
 	}
 	value, loaded := m.handlingStream.LoadOrStore(request.StreamId, newStream(request.StreamId, m))
 	//如果还未建立stream则创建stream处理
+	value.(*Stream).OnRev <- request
 	if !loaded {
-		stream := value.(*Stream)
 		go func() {
-			//等待stream处理完毕
-			<-stream.CloseCh
+			stream := value.(*Stream)
+			err := handler.execute(pkt, stream)
 			if _, ok := m.handlingStream.LoadAndDelete(request.StreamId); !ok { //已被处理close
 				return
 			}
-			closePkt := &StreamClosePacket{Id: uuid.New().String(), StreamId: request.Id}
-			if stream.CloseErr != nil {
-				logger.Error("stream执行出错", zap.Error(stream.CloseErr))
-				closePkt.Error = stream.CloseErr.Error()
+			closePkt := &StreamClosePacket{Id: uuid.New().String(), StreamId: request.StreamId}
+			if err != nil {
+				logger.Error("stream执行出错", zap.Error(err))
+				closePkt.Error = err.Error()
 			}
-			err := m.SendPacketWithRetry(closePkt)
+			err = m.SendPacketWithRetry(closePkt)
 			if err != nil {
 				logger.Error("发送StreamClosePacket出错", zap.Error(err))
 			}
 		}()
-		handler, ok := m.findStreamHandler(request.Method)
-		if !ok {
-			stream.CloseWithError(errors.New("无法找到对应方法"))
-			return
-		}
-		handler(pkt, stream)
-	}
-	if value.(*Stream).OnRequest != nil {
-		value.(*Stream).OnRequest(request)
-	}
-}
-
-func (m *Client) onReceiveCloseStream(pkt *Packet) {
-	req := pkt.PacketContent.(*StreamClosePacket)
-	if req.Id != "" {
-		m.SendPacket(&AckPacket{Id: req.Id})
-	}
-	if handlingStream, loaded := m.handlingStream.LoadAndDelete(req.StreamId); loaded {
-		handlingStream.(*Stream).Close()
 	}
 }
 
@@ -314,9 +301,17 @@ func (m *Client) onReceiveStreamResponse(pkt *Packet) {
 		m.SendPacket(&AckPacket{Id: req.Id})
 	}
 	if handlingStream, loaded := m.handlingStream.Load(req.StreamId); loaded {
-		if handlingStream.(*Stream).OnResponse != nil {
-			handlingStream.(*Stream).OnResponse(req)
-		}
+		handlingStream.(*Stream).OnRev <- req
+	}
+}
+
+func (m *Client) onReceiveCloseStream(pkt *Packet) {
+	req := pkt.PacketContent.(*StreamClosePacket)
+	if req.Id != "" {
+		m.SendPacket(&AckPacket{Id: req.Id})
+	}
+	if handlingStream, loaded := m.handlingStream.Load(req.StreamId); loaded {
+		handlingStream.(*Stream).OnRev <- req
 	}
 }
 
@@ -379,7 +374,9 @@ func (m *Client) RequestWithRetryByPacket(pkt *RequestPacket) (interface{}, erro
 				}
 			case <-timeout:
 				request.err = errors.New("超时未接收到RequestAck或者Response回复")
-				close(request.resultBack)
+				if _, loaded = m.pendingResp.LoadAndDelete(pkt.Id); loaded {
+					close(request.resultBack)
+				}
 				return nil, request.err
 			}
 		}
@@ -410,7 +407,9 @@ func (m *Client) SendPacketWithRetry(pkt INetPacket) error {
 				m.SendMessage(packet)
 			case <-timeout:
 				notify.err = errors.New("超时未接收到ResponseAck回复")
-				close(notify.ackBack)
+				if _, loaded = m.pendingAck.LoadAndDelete(pkt.GetId()); loaded {
+					close(notify.ackBack)
+				}
 				return notify.err
 			}
 		}
@@ -448,22 +447,23 @@ func (m *Client) Unsubscribe(topic string) error {
 }
 
 // 发送Request,重复发直到收到RequestAck或收到Request执行结果或超时(Request_timeout)
-func (m *Client) StreamRequest(method string, params interface{}) *Stream {
+func (m *Client) StreamRequest(method string, params interface{}, execute func(stream *Stream) error) {
 	stream := newStream(uuid.New().String(), m)
 	m.handlingStream.Store(stream.Id, stream)
-	go func() {
-		<-stream.CloseCh
-		if _, loaded := m.handlingStream.LoadAndDelete(stream.Id); !loaded {
-			return
-		}
-		closePkt := &StreamClosePacket{Id: uuid.New().String(), StreamId: stream.Id}
-		if stream.CloseErr != nil {
-			closePkt.Error = stream.CloseErr.Error()
-		}
-		m.SendPacketWithRetry(closePkt)
-	}()
 	stream.RequestWithRetry(method, params)
-	return stream
+	err := execute(stream)
+	if _, ok := m.handlingStream.LoadAndDelete(stream.Id); !ok { //已被处理close
+		return
+	}
+	closePkt := &StreamClosePacket{Id: uuid.New().String(), StreamId: stream.Id}
+	if err != nil {
+		logger.Error("stream执行出错", zap.Error(err))
+		closePkt.Error = err.Error()
+	}
+	err = m.SendPacketWithRetry(closePkt)
+	if err != nil {
+		logger.Error("发送StreamClosePacket出错", zap.Error(err))
+	}
 }
 
 func (m *Client) CallClient(params *CallClientParams) (interface{}, error) {
@@ -541,5 +541,34 @@ type LoginParams struct {
 	ClientId string  `json:"client_id"`
 }
 
-type streamHandler func(first *Packet, stream *Stream)
+type streamHandler func(first *Packet, stream *Stream) error
+
+func (s streamHandler) execute(first *Packet, stream *Stream) error {
+	var executeErr error
+	func() {
+		defer func() {
+			if err := recover(); err != nil {
+				executeErr = err.(error)
+			}
+		}()
+		executeErr = s(first, stream)
+	}()
+	return executeErr
+}
+
 type requestHandler func(pkt *Packet) (interface{}, error)
+
+func (r requestHandler) execute(pkt *Packet) (interface{}, error) {
+	var executeErr error
+	var result interface{}
+	func() {
+		defer func() {
+			if err := recover(); err != nil {
+				executeErr = err.(error)
+				fmt.Println("rpc execute exception:", err)
+			}
+		}()
+		result, executeErr = r(pkt)
+	}()
+	return result, executeErr
+}

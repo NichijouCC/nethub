@@ -67,26 +67,39 @@ func TestClient_StreamRequest(t *testing.T) {
 	conn := DialHubTcp("127.0.0.1:1235", LoginParams{ClientId: uuid.New().String(), BucketId: &projectId})
 	conn.OnLogin.AddEventListener(func(data interface{}) {
 		//初始化流
-		stream := conn.StreamRequest("load_data", nil)
-		go func() {
-			//stream close监听
-			<-stream.CloseCh
-		}()
-
-		for j := 0; j < 100; j++ {
-			//持续发送流消息
-			err := stream.Request(map[string]interface{}{"pp": j})
-			if err != nil {
-				log.Println("error", err)
+		conn.StreamRequest("add", nil, func(stream *Stream) error {
+			go func() {
+				for j := 0; j < 5; j++ {
+					//持续发送流消息
+					err := stream.Request(map[string]interface{}{"pp": j})
+					if err != nil {
+						log.Println("error", err)
+					}
+				}
+				stream.CloseAndRev()
+				log.Println("client stream close send and rev")
+			}()
+		For:
+			for pkt := range stream.OnRev {
+				switch pkt.(type) {
+				case *StreamRequestRawPacket:
+					//处理服务端返回的回复
+					str, _ := json.Marshal(pkt.(*StreamRequestRawPacket))
+					log.Println("client receive req pkt", string(str))
+				case *StreamResponsePacket:
+					//处理服务端返回的回复
+					str, _ := json.Marshal(pkt.(*StreamResponsePacket))
+					log.Println("client receive resp pkt", string(str))
+				case *StreamClosePacket:
+					str, _ := json.Marshal(pkt.(*StreamClosePacket))
+					log.Println("client receive close pkt", string(str))
+					break For
+				}
 			}
-		}
-		//处理服务端返回的回复
-		stream.OnResponse = func(pkt *StreamResponsePacket) {
-			str, _ := json.Marshal(pkt)
-			log.Println("client receive pkt", string(str))
-		}
-		//客户端主动关闭数据流
-		stream.Close()
+
+			log.Println("stream结束")
+			return nil
+		})
 	})
 	select {}
 }
