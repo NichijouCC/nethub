@@ -49,18 +49,22 @@ func New(options *HubOptions) *Hub {
 
 	r.RegisterRequestHandler("register_service", func(pkt *Packet) (interface{}, error) {
 		var params RegisterServiceParams
-		err := json.Unmarshal([]byte(pkt.PacketContent.(*RequestPacket).Params), &params)
+		err := json.Unmarshal([]byte(pkt.PacketContent.(*RequestRawPacket).Params), &params)
 		if err != nil {
 			return nil, errors.New("命令json解析出错")
 		}
 		for _, s := range params.Method {
 			r.RegisterRequestHandler(s, func(pkt *Packet) (interface{}, error) {
-				req := pkt.PacketContent.(*RequestPacket)
+				req := pkt.PacketContent.(*RequestRawPacket)
 				if req.Id == "" {
 					pkt.Client.SendPacket(req)
 					return "成功", nil
 				} else {
-					return pkt.Client.RequestWithRetryByPacket(req)
+					return pkt.Client.RequestWithRetryByPacket(&RequestPacket{
+						Id:     req.Id,
+						Method: req.Method,
+						Params: req.Params,
+					})
 				}
 			})
 		}
@@ -68,7 +72,7 @@ func New(options *HubOptions) *Hub {
 	})
 
 	r.RegisterRequestHandler("call_client", func(pkt *Packet) (interface{}, error) {
-		req := pkt.PacketContent.(*RequestPacket)
+		req := pkt.PacketContent.(*RequestRawPacket)
 		var params CallClientParams
 		err := json.Unmarshal(req.Params, &params)
 		if err != nil {
@@ -111,8 +115,8 @@ func (n *Hub) ListenAndServeUdp(addr string, listenerCount int) {
 				}
 			}
 		} else {
-			if pkt.PacketType == REQUEST_PACKET && pkt.PacketContent.(*RequestPacket).Method == "login" {
-				req := pkt.PacketContent.(*RequestPacket)
+			if pkt.PacketType == REQUEST_PACKET && pkt.PacketContent.(*RequestRawPacket).Method == "login" {
+				req := pkt.PacketContent.(*RequestRawPacket)
 				var params LoginParams
 				err = json.Unmarshal(req.Params, &params)
 				if err != nil {
@@ -145,8 +149,8 @@ func (n *Hub) ListenAndServeTcp(addr string, listenerCount int) {
 				logger.Error("net通信包解析出错", zap.Any("packet", string(first)))
 				return nil, errors.New("认证失败")
 			}
-			if pkt.PacketType == REQUEST_PACKET && pkt.PacketContent.(*RequestPacket).Method == "login" {
-				req := pkt.PacketContent.(*RequestPacket)
+			if pkt.PacketType == REQUEST_PACKET && pkt.PacketContent.(*RequestRawPacket).Method == "login" {
+				req := pkt.PacketContent.(*RequestRawPacket)
 				var params LoginParams
 				err = json.Unmarshal(req.Params, &params)
 				if err != nil {
@@ -230,7 +234,7 @@ type HttpResp struct {
 }
 
 func (n *Hub) handleRequest(pkt *Packet) (interface{}, error) {
-	handler, ok := n.findRequestHandler(pkt.PacketContent.(*RequestPacket).Method)
+	handler, ok := n.findRequestHandler(pkt.PacketContent.(*RequestRawPacket).Method)
 	if !ok {
 		return nil, errors.New("无法找到对应方法")
 	}
@@ -249,7 +253,7 @@ func (n *Hub) handleRequest(pkt *Packet) (interface{}, error) {
 }
 
 func (n *Hub) handleStream(first *Packet, stream *Stream) {
-	handler, ok := n.findStreamHandler(first.PacketContent.(*StreamRequestPacket).Method)
+	handler, ok := n.findStreamHandler(first.PacketContent.(*StreamRequestRawPacket).Method)
 	if !ok {
 		stream.CloseWithError(errors.New("无法找到对应方法"))
 		return

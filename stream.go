@@ -1,7 +1,6 @@
 package nethub
 
 import (
-	"encoding/json"
 	"github.com/google/uuid"
 	"sync"
 )
@@ -9,7 +8,7 @@ import (
 type Stream struct {
 	Id         string
 	client     *Client
-	OnRequest  func(pkt *StreamRequestPacket)
+	OnRequest  func(pkt *StreamRequestRawPacket)
 	OnResponse func(pkt *StreamResponsePacket)
 
 	isClosed bool
@@ -41,20 +40,12 @@ func (s *Stream) CloseWithError(err error) {
 	close(s.CloseCh)
 }
 
-func (s *Stream) Request(params map[string]interface{}) error {
-	paramsBytes, err := json.Marshal(params)
-	if err != nil {
-		return err
-	}
-	return s.client.SendPacket(&StreamRequestPacket{StreamId: s.Id, Params: paramsBytes})
+func (s *Stream) Request(params interface{}) error {
+	return s.client.SendPacket(&StreamRequestPacket{StreamId: s.Id, Params: params})
 }
 
-func (s *Stream) RequestWithRetry(method string, params map[string]interface{}) error {
-	paramsBytes, err := json.Marshal(params)
-	if err != nil {
-		return err
-	}
-	return s.client.SendPacketWithRetry(&StreamRequestPacket{StreamId: s.Id, Id: uuid.New().String(), Method: method, Params: paramsBytes})
+func (s *Stream) RequestWithRetry(method string, params interface{}) error {
+	return s.client.SendPacketWithRetry(&StreamRequestPacket{StreamId: s.Id, Id: uuid.New().String(), Method: method, Params: params})
 }
 
 func (s *Stream) Response(result interface{}, err error) error {

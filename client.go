@@ -140,7 +140,7 @@ func (m *Client) receivePacket(pkt *Packet) {
 }
 
 func (m *Client) onReceiveRequest(pkt *Packet) {
-	request := pkt.PacketContent.(*RequestPacket)
+	request := pkt.PacketContent.(*RequestRawPacket)
 	if request.Id != "" {
 		//收到请求就回复一个ack
 		m.SendPacket(&AckPacket{Id: request.Id})
@@ -197,7 +197,7 @@ func (m *Client) onReceiveAck(pkt *Packet) {
 }
 
 func (m *Client) onReceivePublish(pkt *Packet) {
-	request := pkt.PacketContent.(*TransformedPublishPacket)
+	request := pkt.PacketContent.(*PublishRawPacket)
 	if request.Id != "" {
 		m.SendPacket(&AckPacket{Id: request.Id})
 	}
@@ -215,7 +215,7 @@ func (m *Client) onReceiveSubscribe(sub *Packet) {
 	if request.Id != "" {
 		m.SendPacket(&AckPacket{Id: request.Id})
 	}
-	m.SubTopic(NewTopicListener(request.Topic, func(pkt *TransformedPublishPacket, from *Client) {
+	m.SubTopic(NewTopicListener(request.Topic, func(pkt *PublishRawPacket, from *Client) {
 		if request.Attributes != nil {
 			var msg map[string]interface{}
 			err := json.Unmarshal(pkt.Params, &msg)
@@ -227,7 +227,7 @@ func (m *Client) onReceiveSubscribe(sub *Packet) {
 				filter[attribute] = msg[attribute]
 			}
 			params, _ := json.Marshal(filter)
-			pkt = &TransformedPublishPacket{Id: pkt.Id, Params: params, Topic: pkt.Topic, ClientId: pkt.ClientId}
+			pkt = &PublishRawPacket{Id: pkt.Id, Params: params, Topic: pkt.Topic, ClientId: pkt.ClientId}
 		}
 		if pkt.Id == "" {
 			m.SendPacket(pkt)
@@ -258,7 +258,7 @@ func (m *Client) onReceiveBroadcast(pkt *Packet) {
 }
 
 func (m *Client) onReceiveStreamRequest(pkt *Packet) {
-	request := pkt.PacketContent.(*StreamRequestPacket)
+	request := pkt.PacketContent.(*StreamRequestRawPacket)
 	if request.Id != "" {
 		m.SendPacket(&AckPacket{Id: request.Id})
 	}
@@ -320,11 +320,38 @@ func (m *Client) onReceiveStreamResponse(pkt *Packet) {
 	}
 }
 
+// 发送Request,等待回复或超时
+func (m *Client) Request(method string, params interface{}) (interface{}, error) {
+	pkt := &RequestPacket{Id: uuid.New().String(), Method: method, Params: params}
+	if value, loaded := m.pendingResp.Load(pkt.Id); loaded {
+		request := value.(*flyPacket)
+		<-request.resultBack
+		return request.result, request.err
+	}
+	if value, loaded := m.pendingResp.LoadOrStore(pkt.Id, newFlyRequest()); !loaded {
+		request := value.(*flyPacket)
+		m.SendPacket(pkt)
+		timeout := time.After(time.Second * time.Duration(m.options.RetryTimeout))
+		for {
+			select {
+			case <-request.resultBack:
+				return request.result, request.err
+			case <-timeout:
+				request.err = errors.New("超时未接收到RequestAck或者Response回复")
+				close(request.resultBack)
+				return nil, request.err
+			}
+		}
+	} else {
+		request := value.(*flyPacket)
+		<-request.resultBack
+		return request.result, request.err
+	}
+}
+
 // 发送Request,重复发直到收到RequestAck或收到Request执行结果或超时(Request_timeout)
-func (m *Client) RequestWithRetry(method string, params map[string]interface{}) (interface{}, error) {
-	paramsBytes, _ := json.Marshal(params)
-	pkt := &RequestPacket{Id: uuid.New().String(), Method: method, Params: paramsBytes}
-	return m.RequestWithRetryByPacket(pkt)
+func (m *Client) RequestWithRetry(method string, params interface{}) (interface{}, error) {
+	return m.RequestWithRetryByPacket(&RequestPacket{Id: uuid.New().String(), Method: method, Params: params})
 }
 
 // 发送Request,重复发直到收到RequestAck或收到Request执行结果或超时(Request_timeout)
@@ -402,13 +429,13 @@ func (m *Client) PublishWithRetry(topic string, data interface{}) {
 	m.SendPacketWithRetry(&PublishPacket{Id: uuid.New().String(), Topic: topic, Params: data})
 }
 
-func (m *Client) Subscribe(topic string, callback func(data *TransformedPublishPacket, from *Client)) error {
+func (m *Client) Subscribe(topic string, callback func(data *PublishRawPacket, from *Client)) error {
 	id := uuid.New().String()
 	m.SubTopic(NewTopicListener(topic, callback))
 	return m.SendPacketWithRetry(&SubscribePacket{Id: id, Topic: topic})
 }
 
-func (m *Client) SubscribeAttributes(topic string, attributes []string, callback func(data *TransformedPublishPacket, from *Client)) error {
+func (m *Client) SubscribeAttributes(topic string, attributes []string, callback func(data *PublishRawPacket, from *Client)) error {
 	id := uuid.New().String()
 	m.SubTopic(NewTopicListener(topic, callback))
 	return m.SendPacketWithRetry(&SubscribePacket{Id: id, Topic: topic, Attributes: attributes})
@@ -421,7 +448,7 @@ func (m *Client) Unsubscribe(topic string) error {
 }
 
 // 发送Request,重复发直到收到RequestAck或收到Request执行结果或超时(Request_timeout)
-func (m *Client) StreamRequest(method string, params map[string]interface{}) *Stream {
+func (m *Client) StreamRequest(method string, params interface{}) *Stream {
 	stream := newStream(uuid.New().String(), m)
 	m.handlingStream.Store(stream.Id, stream)
 	go func() {
@@ -440,14 +467,11 @@ func (m *Client) StreamRequest(method string, params map[string]interface{}) *St
 }
 
 func (m *Client) CallClient(params *CallClientParams) (interface{}, error) {
-	data, _ := json.Marshal(params)
-	req := &RequestPacket{Id: uuid.New().String(), Method: "call_client", Params: data}
-	return m.RequestWithRetryByPacket(req)
+	return m.RequestWithRetryByPacket(&RequestPacket{Id: uuid.New().String(), Method: "call_client", Params: params})
 }
 
 func (m *Client) Login(params *LoginParams) (string, error) {
-	data, _ := json.Marshal(params)
-	pkt := &RequestPacket{Id: uuid.New().String(), Method: "login", Params: data}
+	pkt := &RequestPacket{Id: uuid.New().String(), Method: "login", Params: params}
 	sessionId, err := m.RequestWithRetryByPacket(pkt)
 	if err != nil {
 		return "", err
@@ -508,7 +532,7 @@ type RegisterServiceParams struct {
 
 type CallClientParams struct {
 	ClientId string
-	Message  *RequestPacket
+	Message  *RequestRawPacket
 }
 
 type LoginParams struct {

@@ -16,13 +16,13 @@ func TestWebSub_SubGps(t *testing.T) {
 		//sn := fmt.Sprintf("T_%03d", i)
 		ws.OnLogin.AddEventListener(func(data interface{}) {
 			//var topic = fmt.Sprintf("%v/rt_message", sn)
-			err := ws.Subscribe("+/rt_message", func(data *TransformedPublishPacket, from *Client) {
+			err := ws.Subscribe("+/rt_message", func(data *PublishRawPacket, from *Client) {
 				log.Println(data.ClientId, string(data.Params))
 			})
 			if err != nil {
 				log.Println("订阅消息出错", err.Error())
 			}
-			ws.Subscribe("+/gps_message", func(data *TransformedPublishPacket, from *Client) {
+			ws.Subscribe("+/gps_message", func(data *PublishRawPacket, from *Client) {
 				log.Println(data.ClientId, string(data.Params))
 			})
 		})

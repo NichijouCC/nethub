@@ -29,9 +29,9 @@ func (m *Bucket) Broadcast(packet []byte) {
 	})
 }
 
-func (m *Bucket) PubTopic(pkt *TransformedPublishPacket, from *Client) {
+func (m *Bucket) PubTopic(pkt *PublishRawPacket, from *Client) {
 	if m.parent != nil {
-		m.parent.PubTopic(&TransformedPublishPacket{
+		m.parent.PubTopic(&PublishRawPacket{
 			Id:       pkt.Id,
 			Topic:    fmt.Sprintf("%v/%v", m.bucketId, pkt.Topic),
 			Params:   pkt.Params,
@@ -56,9 +56,9 @@ func (m *Bucket) FindClient(id string) (*Client, bool) {
 func (m *Bucket) AddClient(client *Client) {
 	m.clients.Store(client.ClientId, client)
 	client.Bucket = m
-	m.PubTopic(&TransformedPublishPacket{Topic: "connect"}, client)
+	m.PubTopic(&PublishRawPacket{Topic: "connect"}, client)
 	client.OnDisconnect.AddEventListener(func(data interface{}) {
 		m.clients.Delete(client.ClientId)
-		m.PubTopic(&TransformedPublishPacket{Topic: "disconnect"}, client)
+		m.PubTopic(&PublishRawPacket{Topic: "disconnect"}, client)
 	})
 }

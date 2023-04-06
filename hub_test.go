@@ -23,7 +23,7 @@ func TestHub_RegisterRequestHandler(t *testing.T) {
 	hub.ListenAndServeTcp(":1235", 2)
 
 	hub.RegisterRequestHandler("add", func(pkt *Packet) (interface{}, error) {
-		req := pkt.PacketContent.(*RequestPacket)
+		req := pkt.PacketContent.(*RequestRawPacket)
 		_ = req.Params
 		//todo
 		return nil, nil
@@ -40,7 +40,7 @@ func TestHub_RegisterStreamHandler(t *testing.T) {
 
 	hub.RegisterStreamHandler("add", func(first *Packet, stream *Stream) {
 		//初次触发,执行
-		stream.OnRequest = func(pkt *StreamRequestPacket) {
+		stream.OnRequest = func(pkt *StreamRequestRawPacket) {
 			_ = pkt.Method
 			_ = pkt.Params
 			_ = pkt.Id

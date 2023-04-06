@@ -47,9 +47,9 @@ type INetPacket interface {
 }
 
 type RequestPacket struct {
-	Id     string          `json:"id,omitempty"`
-	Method string          `json:"method"`
-	Params json.RawMessage `json:"params"`
+	Id     string      `json:"id,omitempty"`
+	Method string      `json:"method"`
+	Params interface{} `json:"params"`
 }
 
 func (r *RequestPacket) TypeCode() PacketTypeCode {
@@ -60,18 +60,46 @@ func (r *RequestPacket) GetId() string {
 	return r.Id
 }
 
-type TransformedPublishPacket struct {
+type RequestRawPacket struct {
+	Id     string          `json:"id,omitempty"`
+	Method string          `json:"method"`
+	Params json.RawMessage `json:"params"`
+}
+
+func (r *RequestRawPacket) TypeCode() PacketTypeCode {
+	return REQUEST_PACKET
+}
+
+func (r *RequestRawPacket) GetId() string {
+	return r.Id
+}
+
+type PublishPacket struct {
+	Id     string      `json:"id,omitempty"`
+	Topic  string      `json:"topic"`
+	Params interface{} `json:"params"`
+}
+
+func (r *PublishPacket) TypeCode() PacketTypeCode {
+	return PUBLISH_PACKET
+}
+
+func (r *PublishPacket) GetId() string {
+	return r.Id
+}
+
+type PublishRawPacket struct {
 	Id       string          `json:"id,omitempty"`
 	Topic    string          `json:"topic"`
 	Params   json.RawMessage `json:"params"`
 	ClientId string          `json:"client_id,omitempty"`
 }
 
-func (r *TransformedPublishPacket) TypeCode() PacketTypeCode {
+func (r *PublishRawPacket) TypeCode() PacketTypeCode {
 	return PUBLISH_PACKET
 }
 
-func (r *TransformedPublishPacket) GetId() string {
+func (r *PublishRawPacket) GetId() string {
 	return r.Id
 }
 
@@ -99,7 +127,7 @@ func (r *UnSubscribePacket) GetId() string {
 	return r.Id
 }
 
-type BroadcastPacket TransformedPublishPacket
+type BroadcastPacket PublishRawPacket
 
 func (r *BroadcastPacket) TypeCode() PacketTypeCode {
 	return BROADCAST_PACKET
@@ -136,10 +164,10 @@ func (r *AckPacket) GetId() string {
 }
 
 type StreamRequestPacket struct {
-	StreamId string          `json:"stream_id"`
-	Id       string          `json:"id,omitempty"`
-	Method   string          `json:"method,omitempty"`
-	Params   json.RawMessage `json:"params"`
+	StreamId string      `json:"stream_id"`
+	Id       string      `json:"id,omitempty"`
+	Method   string      `json:"method,omitempty"`
+	Params   interface{} `json:"params"`
 }
 
 func (r *StreamRequestPacket) TypeCode() PacketTypeCode {
@@ -147,6 +175,21 @@ func (r *StreamRequestPacket) TypeCode() PacketTypeCode {
 }
 
 func (r *StreamRequestPacket) GetId() string {
+	return r.Id
+}
+
+type StreamRequestRawPacket struct {
+	StreamId string          `json:"stream_id"`
+	Id       string          `json:"id,omitempty"`
+	Method   string          `json:"method,omitempty"`
+	Params   json.RawMessage `json:"params"`
+}
+
+func (r *StreamRequestRawPacket) TypeCode() PacketTypeCode {
+	return STREAM_REQUEST_PACKET
+}
+
+func (r *StreamRequestRawPacket) GetId() string {
 	return r.Id
 }
 
@@ -201,7 +244,7 @@ func (r *PongPacket) GetId() string {
 
 var netPacketUnmarshalDic = map[PacketTypeCode]func(packet []byte) (INetPacket, error){
 	REQUEST_PACKET: func(body []byte) (INetPacket, error) {
-		var req RequestPacket
+		var req RequestRawPacket
 		err := json.Unmarshal(body, &req)
 		return &req, err
 	},
@@ -216,7 +259,7 @@ var netPacketUnmarshalDic = map[PacketTypeCode]func(packet []byte) (INetPacket, 
 		return &req, err
 	},
 	PUBLISH_PACKET: func(body []byte) (INetPacket, error) {
-		var req TransformedPublishPacket
+		var req PublishRawPacket
 		err := json.Unmarshal(body, &req)
 		return &req, err
 	},
@@ -236,7 +279,7 @@ var netPacketUnmarshalDic = map[PacketTypeCode]func(packet []byte) (INetPacket, 
 		return &req, err
 	},
 	STREAM_REQUEST_PACKET: func(body []byte) (INetPacket, error) {
-		var req StreamRequestPacket
+		var req StreamRequestRawPacket
 		err := json.Unmarshal(body, &req)
 		return &req, err
 	},
@@ -309,18 +352,4 @@ func Marshal(pkt INetPacket) []byte {
 
 func Unmarshal(rawPacket []byte) (*Packet, error) {
 	return packetCoder.unmarshal(rawPacket)
-}
-
-type PublishPacket struct {
-	Id     string      `json:"id,omitempty"`
-	Topic  string      `json:"topic"`
-	Params interface{} `json:"params"`
-}
-
-func (r *PublishPacket) TypeCode() PacketTypeCode {
-	return PUBLISH_PACKET
-}
-
-func (r *PublishPacket) GetId() string {
-	return r.Id
 }
