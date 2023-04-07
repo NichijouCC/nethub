@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	pongWait     = 10 * time.Second
+	pongWait     = 60 * time.Second
 	pingInterval = (pongWait * 9) / 10
 	writeWait    = 3 * time.Second
 )
