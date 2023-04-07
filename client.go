@@ -491,6 +491,10 @@ func (m *Client) SendPacket(packet INetPacket) error {
 	return m.SendMessage(packetCoder.marshal(packet))
 }
 
+func (m *Client) SendPacketDirect(packet INetPacket) error {
+	return m.SendMessageDirect(packetCoder.marshal(packet))
+}
+
 func (m *Client) Close() {
 	if m.isClosed.Load() {
 		return

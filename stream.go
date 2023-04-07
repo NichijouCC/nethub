@@ -2,31 +2,19 @@ package nethub
 
 import (
 	"github.com/google/uuid"
-	"sync"
 )
 
 type Stream struct {
 	Id     string
 	client *Client
-	//OnRevRequest  chan *StreamRequestRawPacket
-	//OnRevResponse chan *StreamResponsePacket
-	////对面不再发数据
-	//OnRevClose chan *StreamClosePacket
-	OnRev chan INetPacket
-
-	//自身不再发数据
-	closeSend bool
-	sync.Mutex
+	OnRev  chan INetPacket
 }
 
 func newStream(id string, client *Client) *Stream {
 	s := &Stream{
 		Id:     id,
 		client: client,
-		//OnRevRequest:  make(chan *StreamRequestRawPacket, 1),
-		//OnRevResponse: make(chan *StreamResponsePacket, 1),
-		//OnRevClose:    make(chan *StreamClosePacket, 1),
-		OnRev: make(chan INetPacket, 10),
+		OnRev:  make(chan INetPacket, 10),
 	}
 	return s
 }
@@ -36,7 +24,7 @@ func (s *Stream) CloseAndRev() error {
 }
 
 func (s *Stream) Request(params interface{}) error {
-	return s.client.SendPacket(&StreamRequestPacket{StreamId: s.Id, Params: params})
+	return s.client.SendPacketDirect(&StreamRequestPacket{StreamId: s.Id, Params: params})
 }
 
 func (s *Stream) RequestWithRetry(method string, params interface{}) error {
@@ -48,7 +36,7 @@ func (s *Stream) Response(result interface{}, err error) error {
 	if err != nil {
 		resp.Error = err.Error()
 	}
-	return s.client.SendPacket(resp)
+	return s.client.SendPacketDirect(resp)
 }
 
 func (s *Stream) ResponseWithRetry(result interface{}, err error) error {
