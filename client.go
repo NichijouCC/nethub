@@ -450,7 +450,7 @@ func (m *Client) Unsubscribe(topic string) error {
 func (m *Client) StreamRequest(method string, params interface{}, execute func(stream *Stream) error) {
 	stream := newStream(uuid.New().String(), m)
 	m.handlingStream.Store(stream.Id, stream)
-	stream.RequestWithRetry(method, params)
+	stream.Client.RequestWithRetry(method, params)
 	err := execute(stream)
 	if _, ok := m.handlingStream.LoadAndDelete(stream.Id); !ok { //已被处理close
 		return
