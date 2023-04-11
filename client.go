@@ -268,8 +268,8 @@ func (m *Client) onReceiveStreamRequest(pkt *Packet) {
 	}
 	handler, ok := m.findStreamHandler(request.Method)
 	if !ok {
-		closePkt := &StreamClosePacket{Id: uuid.New().String(), StreamId: request.Id, Error: "无法找到对应方法"}
-		go m.SendPacketWithRetry(closePkt)
+		closePkt := &StreamClosePacket{StreamId: request.Id, Error: "无法找到对应方法"}
+		go m.SendPacketDirect(closePkt)
 		return
 	}
 	value, loaded := m.handlingStream.LoadOrStore(request.StreamId, newStream(request.StreamId, m))
@@ -282,12 +282,12 @@ func (m *Client) onReceiveStreamRequest(pkt *Packet) {
 			if _, ok := m.handlingStream.LoadAndDelete(request.StreamId); !ok { //已被处理close
 				return
 			}
-			closePkt := &StreamClosePacket{Id: uuid.New().String(), StreamId: request.StreamId}
+			closePkt := &StreamClosePacket{StreamId: request.StreamId}
 			if err != nil {
 				logger.Error("stream执行出错", zap.Error(err))
 				closePkt.Error = err.Error()
 			}
-			err = m.SendPacketWithRetry(closePkt)
+			err = m.SendPacketDirect(closePkt)
 			if err != nil {
 				logger.Error("发送StreamClosePacket出错", zap.Error(err))
 			}
@@ -455,12 +455,12 @@ func (m *Client) StreamRequest(method string, params interface{}, execute func(s
 	if _, ok := m.handlingStream.LoadAndDelete(stream.Id); !ok { //已被处理close
 		return
 	}
-	closePkt := &StreamClosePacket{Id: uuid.New().String(), StreamId: stream.Id}
+	closePkt := &StreamClosePacket{StreamId: stream.Id}
 	if err != nil {
 		logger.Error("stream执行出错", zap.Error(err))
 		closePkt.Error = err.Error()
 	}
-	err = m.SendPacketWithRetry(closePkt)
+	err = m.SendPacketDirect(closePkt)
 	if err != nil {
 		logger.Error("发送StreamClosePacket出错", zap.Error(err))
 	}

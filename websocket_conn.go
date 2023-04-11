@@ -36,6 +36,8 @@ type WebsocketConn struct {
 	OnDisconnect *EventTarget
 	Conn         *websocket.Conn
 	properties   sync.Map
+
+	writeMtx sync.Mutex
 }
 
 func (t *WebsocketConn) GetProperty(property string) (interface{}, bool) {
@@ -112,17 +114,22 @@ func (t *WebsocketConn) StartReadWrite() {
 					return
 				}
 			case <-ticker.C:
+				t.writeMtx.Lock()
 				t.Conn.SetWriteDeadline(time.Now().Add(writeWait))
 				if err := t.Conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
 					log.Println(fmt.Sprintf(`websocket write ping error:%v`, err.Error()))
+					t.writeMtx.Unlock()
 					return
 				}
+				t.writeMtx.Unlock()
 			}
 		}
 	}()
 }
 
 func (t *WebsocketConn) writeOnePacket(msg []byte) error {
+	t.writeMtx.Lock()
+	defer t.writeMtx.Unlock()
 	atomic.AddUint64(&WsWriteByte, uint64(len(msg)))
 	atomic.AddUint64(&WsWritePkts, 1)
 	t.Conn.SetWriteDeadline(time.Now().Add(writeWait))
