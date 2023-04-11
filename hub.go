@@ -219,12 +219,19 @@ func (n *Hub) ListenAndServeWebsocket(addr string) {
 	go ws.ListenAndServe(n.httpLogin)
 }
 
-func (n *Hub) findOrCreateBucket(id int64) *Bucket {
+func (n *Hub) FindOrCreateBucket(id int64) *Bucket {
 	if value, loaded := n.buckets.Load(id); loaded {
 		return value.(*Bucket)
 	}
 	value, _ := n.buckets.LoadOrStore(id, newBucket(id, n.Bucket))
 	return value.(*Bucket)
+}
+
+func (n *Hub) FindBucket(id int64) (*Bucket, bool) {
+	if value, loaded := n.buckets.Load(id); loaded {
+		return value.(*Bucket), true
+	}
+	return nil, false
 }
 
 type HttpResp struct {
@@ -285,7 +292,7 @@ func (n *Hub) findCacheSession(sessionId string) (*sessionData, bool) {
 	return data, true
 }
 
-func (n *Hub) findClient(clientId string) (*Client, bool) {
+func (n *Hub) FindClient(clientId string) (*Client, bool) {
 	client, ok := n.clients.Load(clientId)
 	if !ok {
 		return nil, false
@@ -294,7 +301,7 @@ func (n *Hub) findClient(clientId string) (*Client, bool) {
 }
 
 func (n *Hub) createClient(conn IConn, data *sessionData) *Client {
-	if client, ok := n.findClient(data.ClientId); ok {
+	if client, ok := n.FindClient(data.ClientId); ok {
 		logger.Error(fmt.Sprintf("clientId【%v】已连接,关闭旧连接", data.ClientId))
 		client.Close()
 	}
@@ -325,7 +332,7 @@ func (n *Hub) createClient(conn IConn, data *sessionData) *Client {
 	n.usingSession.Store(data.SessionId, client)
 
 	if data.NodeId != nil {
-		bucket := n.findOrCreateBucket(*data.NodeId)
+		bucket := n.FindOrCreateBucket(*data.NodeId)
 		bucket.AddClient(client)
 	} else {
 		n.AddClient(client)
