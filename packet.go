@@ -294,12 +294,14 @@ var netPacketUnmarshalDic = map[PacketTypeCode]func(packet []byte) (INetPacket, 
 		return &req, err
 	},
 	PING_PACKET: func(body []byte) (INetPacket, error) {
-		var req = PingPacket(body)
-		return &req, nil
+		var req PingPacket
+		err := json.Unmarshal(body, &req)
+		return &req, err
 	},
 	PONG_PACKET: func(body []byte) (INetPacket, error) {
-		var req = PingPacket(body)
-		return &req, nil
+		var req PongPacket
+		err := json.Unmarshal(body, &req)
+		return &req, err
 	},
 }
 

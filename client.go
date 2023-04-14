@@ -32,6 +32,8 @@ type Client struct {
 	OnLogin            *EventTarget
 	OnDisconnect       *EventTarget
 	OnHeartbeatTimeout *EventTarget
+	OnPingHandler      func(pkt *PingPacket)
+	OnPongHandler      func(pkt *PongPacket)
 	isClosed           atomic.Bool
 	lastMessageTime    atomic.Value
 
@@ -85,10 +87,17 @@ func newClient(clientId string, conn IConn, opts *ClientOptions) *Client {
 	client.packetHandler[STREAM_RESPONSE_PACKET] = client.onReceiveStreamResponse
 	client.packetHandler[STREAM_CLOSE_PACKET] = client.onReceiveCloseStream
 	client.packetHandler[PING_PACKET] = func(pkt *Packet) {
+		if client.OnPingHandler != nil {
+			client.OnPingHandler(pkt.PacketContent.(*PingPacket))
+		}
 		var content = PongPacket(*pkt.PacketContent.(*PingPacket))
 		client.SendPacket(&content)
 	}
-	client.packetHandler[PONG_PACKET] = func(pkt *Packet) {}
+	client.packetHandler[PONG_PACKET] = func(pkt *Packet) {
+		if client.OnPongHandler != nil {
+			client.OnPongHandler(pkt.PacketContent.(*PongPacket))
+		}
+	}
 
 	go func() {
 		for pkt := range client.enqueueCh {
@@ -177,6 +186,9 @@ func (m *Client) onReceiveRequest(pkt *Packet) {
 
 func (m *Client) onReceiveResponse(pkt *Packet) {
 	resp := pkt.PacketContent.(*ResponsePacket)
+	if resp.Id != "" {
+		m.SendPacket(&AckPacket{Id: resp.Id})
+	}
 	if value, loaded := m.pendingResp.LoadAndDelete(resp.Id); loaded {
 		f := value.(*flyPacket)
 		if resp.Error != "" {
@@ -479,12 +491,12 @@ func (m *Client) Login(params *LoginParams) (string, error) {
 	return sessionId.(string), nil
 }
 
-func (m *Client) SendMessage(packet []byte) error {
-	return m.conn.Load().(IConn).SendMessage(packet)
+func (m *Client) SendMessage(message []byte) error {
+	return m.conn.Load().(IConn).SendMessage(message)
 }
 
-func (m *Client) SendMessageDirect(packet []byte) error {
-	return m.conn.Load().(IConn).SendMessageDirect(packet)
+func (m *Client) SendMessageDirect(message []byte) error {
+	return m.conn.Load().(IConn).SendMessageDirect(message)
 }
 
 func (m *Client) SendPacket(packet INetPacket) error {

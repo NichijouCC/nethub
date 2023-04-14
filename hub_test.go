@@ -55,7 +55,7 @@ func TestHub_RegisterStreamHandler(t *testing.T) {
 				//发送消息到客户端,举例
 				wait.Add(1)
 				go func() {
-					stream.RequestWithRetry("xx", nil)
+					stream.Request(map[string]interface{}{"xx": 1})
 					wait.Done()
 				}()
 			case *StreamResponsePacket:
@@ -74,4 +74,66 @@ func TestHub_RegisterStreamHandler(t *testing.T) {
 	})
 
 	select {}
+}
+
+func TestHub_subscribe(t *testing.T) {
+	hub := New(&HubOptions{
+		HeartbeatTimeout: 10,
+		RetryTimeout:     10,
+		RetryInterval:    3,
+	})
+	hub.ListenAndServeTcp(":1235", 2)
+
+	hub.SubTopic(NewTopicListener("+/+/rt_message", func(pkt *PublishRawPacket, from *Client) {
+
+	}))
+}
+
+func TestJson(t *testing.T) {
+	req := RequestPacket{
+		Id:     "123231",
+		Method: "tesst",
+		Params: map[string]interface{}{"a": 1},
+	}
+	reqBytes, _ := json.Marshal(&req)
+
+	type TestUnMarshal1 struct {
+		Id     string
+		Method string
+		Params interface{}
+	}
+	var test1 TestUnMarshal1
+	json.Unmarshal(reqBytes, &test1)
+	log.Println(test1)
+
+	type TestUnMarshal2 struct {
+		Id     string
+		Method string
+		Params json.RawMessage
+	}
+	var test2 TestUnMarshal2
+	json.Unmarshal(reqBytes, &test2)
+
+	var params2 = make(map[string]interface{})
+	json.Unmarshal(test2.Params, &params2)
+
+	log.Println(test2, params2)
+
+	req2 := RequestPacket{
+		Id:     "123231",
+		Method: "tesst",
+		Params: "1231",
+	}
+	reqBytes2, _ := json.Marshal(&req2)
+	var test3 TestUnMarshal1
+	json.Unmarshal(reqBytes2, &test3)
+	log.Println(test3)
+
+	var test4 TestUnMarshal2
+	json.Unmarshal(reqBytes2, &test4)
+
+	var params4 string
+	json.Unmarshal(test4.Params, &params4)
+
+	log.Println(test4, params4)
 }

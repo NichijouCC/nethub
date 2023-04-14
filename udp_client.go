@@ -139,16 +139,16 @@ func DialHubUdp(addr string, params LoginParams) *Client {
 	})
 	var tryConn func()
 	tryConn = func() {
-		logger.Info("Try进行websocket连接..", zap.Any("addr", addr))
+		logger.Info("Try进行udp连接..", zap.Any("addr", addr))
 		conn, err := DialUdp(addr)
 		if err != nil {
-			logger.Info("websocket连接失败", zap.Error(err))
+			logger.Info("udp连接失败", zap.Error(err))
 			time.Sleep(time.Second * 3)
 			tryConn()
 			return
 		}
 		conn.OnDisconnect.AddEventListener(func(data interface{}) {
-			logger.Info("websocket断开连接")
+			logger.Info("udp断开连接")
 			client.ClearAllSubTopics()
 			time.Sleep(3 * time.Second)
 			tryConn()
