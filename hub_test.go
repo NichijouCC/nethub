@@ -13,9 +13,11 @@ func TestHub_ListenAndServe(t *testing.T) {
 		RetryTimeout:     10,
 		RetryInterval:    3,
 	})
-	hub.ListenAndServeUdp(":1234", 2)
-	hub.ListenAndServeTcp(":1235", 2)
-	hub.ListenAndServeWebsocket(":1555")
+	//hub.ListenAndServeUdp(":1234", 2)
+	//hub.ListenAndServeTcp(":1235", 2)
+	hub.ListenAndServeWebsocketWithAuth(":1555", func(params LoginParams) error {
+		return nil
+	})
 	select {}
 }
 

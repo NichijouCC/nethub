@@ -232,10 +232,12 @@ func (n *Hub) ListenAndServeWebsocketWithAuth(addr string, checkLogin CheckLogin
 				NodeId:    params.BucketId,
 				SessionId: uuid.New().String(),
 			}
-			n.createClient(conn, data)
 			return data, nil
 		},
 	}))
+	ws.OnClientConnect = func(conn *WebsocketConn) {
+		n.createClient(conn, conn.auth.(*SessionData))
+	}
 	go ws.ListenAndServe()
 	return ws
 }

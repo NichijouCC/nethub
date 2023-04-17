@@ -49,6 +49,17 @@ func TestClient_Subscribe(t *testing.T) {
 	select {}
 }
 
+func TestClient_wesocket_Subscribe(t *testing.T) {
+	var projectId int64 = 53010217439105
+	client := DialHubWebsocket("ws://127.0.0.1:1555", LoginParams{ClientId: uuid.New().String(), BucketId: &projectId})
+	client.OnLogin.AddEventListener(func(data interface{}) {
+		client.Subscribe("+/rt_message", func(data *PublishRawPacket, from *Client) {
+			log.Println(data.ClientId, string(data.Params))
+		})
+	})
+	select {}
+}
+
 func TestClient_Publish(t *testing.T) {
 	var projectId int64 = 53010217439105
 	client := DialHubTcp("127.0.0.1:1235", LoginParams{ClientId: uuid.New().String(), BucketId: &projectId})
