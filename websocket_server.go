@@ -19,7 +19,8 @@ type WebsocketServer struct {
 	Addr string
 	Opts *ServerOptions
 	sync.RWMutex
-	clients map[*WebsocketConn]struct{}
+	clients    map[*WebsocketConn]struct{}
+	HttpServer *http.Server
 
 	OnReceiveMessage   func(message []byte, conn *WebsocketConn)
 	OnError            func(err error)
@@ -32,27 +33,27 @@ func NewWebsocketServer(addr string, args ...func(opt *ServerOptions)) *Websocke
 	for _, el := range args {
 		el(opts)
 	}
-	return &WebsocketServer{
+	ws := &WebsocketServer{
 		Addr:    addr,
 		Opts:    opts,
 		clients: map[*WebsocketConn]struct{}{},
 	}
-}
-
-func (ws *WebsocketServer) ListenAndServe(login func(w http.ResponseWriter, r *http.Request)) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", ws.accept)
-	mux.HandleFunc("/login", login)
-	srv := &http.Server{
+	ws.HttpServer = &http.Server{
 		Addr:      ws.Addr,
 		Handler:   mux,
 		TLSConfig: ws.Opts.Tls,
 	}
+	return ws
+}
+
+func (ws *WebsocketServer) ListenAndServe() error {
 	log.Println("websocket Server try listen to ", ws.Addr)
 	if ws.Opts.Tls != nil {
-		return srv.ListenAndServeTLS("", "")
+		return ws.HttpServer.ListenAndServeTLS("", "")
 	} else {
-		return srv.ListenAndServe()
+		return ws.HttpServer.ListenAndServe()
 	}
 }
 

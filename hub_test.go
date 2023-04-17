@@ -13,8 +13,8 @@ func TestHub_ListenAndServe(t *testing.T) {
 		RetryTimeout:     10,
 		RetryInterval:    3,
 	})
-	hub.ListenAndServeTcp(":1235", 2)
 	hub.ListenAndServeUdp(":1234", 2)
+	hub.ListenAndServeTcp(":1235", 2)
 	hub.ListenAndServeWebsocket(":1555")
 	select {}
 }
@@ -26,7 +26,6 @@ func TestHub_RegisterRequestHandler(t *testing.T) {
 		RetryInterval:    3,
 	})
 	hub.ListenAndServeTcp(":1235", 2)
-
 	hub.RegisterRequestHandler("add", func(pkt *Packet) (interface{}, error) {
 		req := pkt.PacketContent.(*RequestRawPacket)
 		_ = req.Params

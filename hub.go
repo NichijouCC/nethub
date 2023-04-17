@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
-	"io"
-	"net/http"
 	"strconv"
 	"sync"
 	"time"
@@ -22,18 +20,14 @@ type HubOptions struct {
 
 type Hub struct {
 	//sessionId->*sessionData
-	cacheSession sync.Map
-	//sessionId->*NetClient
-	usingSession sync.Map
+	temptCacheSession sync.Map
 	//clientId->*NetClient
 	clients sync.Map
 	//bucketId->*NetBucket
 	buckets sync.Map
 	*Bucket
 	*handlerMgr
-	//用于login认证
-	checkLogin func(params *LoginParams) bool
-	options    *HubOptions
+	options *HubOptions
 }
 
 func New(options *HubOptions) *Hub {
@@ -91,10 +85,40 @@ func New(options *HubOptions) *Hub {
 	})
 	return r
 }
-
 func (n *Hub) ListenAndServeUdp(addr string, listenerCount int) {
 	//udp Server
 	udp := NewUdpServer(addr)
+	var addrToClient sync.Map
+	udp.OnReceiveMessage = func(rawData []byte, conn *udpConn) {
+		pkt, err := packetCoder.unmarshal(rawData)
+		if err != nil {
+			logger.Error("net通信包解析出错", zap.Any("packet", string(rawData)))
+			return
+		}
+		value, loaded := addrToClient.LoadOrStore(conn.Addr.String(), struct{}{})
+		if !loaded {
+			client := n.createClient(conn, &SessionData{
+				ClientId:  uuid.New().String(),
+				SessionId: uuid.New().String(),
+			})
+			addrToClient.Store(conn.Addr.String(), client)
+			client.conn.Store(conn)
+			client.receivePacket(pkt)
+		} else {
+			client := value.(*Client)
+			client.conn.Store(conn)
+			client.receivePacket(pkt)
+		}
+	}
+	udp.ListenAndServe(listenerCount)
+}
+
+// 这个起的server会进行消息验证,需要自行构建一个httpServer提供登录接口,用于登录获得sessionId
+func (n *Hub) ListenAndServeUdpWithAuth(addr string, listenerCount int) *UdpServer {
+	//udp Server
+	udp := NewUdpServer(addr)
+	//sessionId->*NetClient
+	var usingSession sync.Map
 	udp.OnReceiveMessage = func(rawData []byte, conn *udpConn) {
 		pkt, err := packetCoder.unmarshal(rawData)
 		if err != nil {
@@ -102,45 +126,26 @@ func (n *Hub) ListenAndServeUdp(addr string, listenerCount int) {
 			return
 		}
 		if pkt.Util != "" {
-			if value, loaded := n.usingSession.Load(pkt.Util); loaded {
+			if value, loaded := usingSession.Load(pkt.Util); loaded {
 				client := value.(*Client)
 				client.conn.Store(conn)
 				client.receivePacket(pkt)
 			} else {
-				if value, loaded = n.cacheSession.LoadAndDelete(pkt.Util); loaded {
-					data := value.(*sessionData)
+				if value, loaded = n.temptCacheSession.LoadAndDelete(pkt.Util); loaded {
+					data := value.(*SessionData)
 					client := n.createClient(conn, data)
+					usingSession.Store(data.SessionId, client)
 					client.conn.Store(conn)
 					client.receivePacket(pkt)
 				}
 			}
-		} else {
-			if pkt.PacketType == REQUEST_PACKET && pkt.PacketContent.(*RequestRawPacket).Method == "login" {
-				req := pkt.PacketContent.(*RequestRawPacket)
-				var params LoginParams
-				err = json.Unmarshal(req.Params, &params)
-				if err != nil {
-					conn.SendMessage(packetCoder.marshal(&ResponsePacket{Id: req.Id, Error: "认证失败"}))
-					return
-				}
-				session, err := n.login(params)
-				if err != nil {
-					conn.SendMessage(packetCoder.marshal(&ResponsePacket{Id: req.Id, Error: "认证失败"}))
-					return
-				}
-				conn.SendMessage(packetCoder.marshal(&ResponsePacket{Id: req.Id, Result: session.SessionId}))
-				//创建client
-				client := n.createClient(conn, session)
-				go client.LoopCheckAlive()
-			}
-			return
 		}
 	}
 	udp.ListenAndServe(listenerCount)
+	return udp
 }
 
-func (n *Hub) ListenAndServeTcp(addr string, listenerCount int) {
-	//tcp Server
+func (n *Hub) ListenAndServeTcpWithAuth(addr string, listenerCount int, checkLogin CheckLogin) {
 	tcp := NewTcpServer(addr, WithAuth(&authOptions{
 		Timeout: time.Second,
 		CheckFunc: func(first []byte, conn IConn) (interface{}, error) {
@@ -157,18 +162,20 @@ func (n *Hub) ListenAndServeTcp(addr string, listenerCount int) {
 					conn.SendMessage(packetCoder.marshal(&ResponsePacket{Id: req.Id, Error: "认证失败"}))
 					return nil, errors.New("认证失败")
 				}
-				if n.checkLogin != nil && !n.checkLogin(&params) {
+				err = checkLogin(params)
+				if err != nil {
 					conn.SendMessage(packetCoder.marshal(&ResponsePacket{Id: req.Id, Error: "认证失败"}))
-					return "", errors.New("认证失败")
+					return nil, err
 				}
 				conn.SendMessage(packetCoder.marshal(&ResponsePacket{Id: req.Id, Result: "认证成功"}))
 				//创建client
-				n.createClient(conn, &sessionData{
+				data := &SessionData{
 					ClientId:  params.ClientId,
 					NodeId:    params.BucketId,
 					SessionId: uuid.New().String(),
-				})
-				return true, nil
+				}
+				n.createClient(conn, data)
+				return data, nil
 			} else {
 				return nil, errors.New("认证失败")
 			}
@@ -177,7 +184,20 @@ func (n *Hub) ListenAndServeTcp(addr string, listenerCount int) {
 	go tcp.ListenAndServe(listenerCount)
 }
 
-func (n *Hub) ListenAndServeWebsocket(addr string) {
+func (n *Hub) ListenAndServeTcp(addr string, listenerCount int) *TcpServer {
+	tcp := NewTcpServer(addr)
+	tcp.OnClientConnect = func(conn *TcpConn) {
+		//创建client
+		n.createClient(conn, &SessionData{
+			ClientId:  uuid.New().String(),
+			SessionId: uuid.New().String(),
+		})
+	}
+	go tcp.ListenAndServe(listenerCount)
+	return tcp
+}
+
+func (n *Hub) ListenAndServeWebsocketWithAuth(addr string, checkLogin CheckLogin) *WebsocketServer {
 	//websocket Server
 	ws := NewWebsocketServer(addr, WithAuth(&authOptions{
 		Timeout: time.Second,
@@ -203,20 +223,34 @@ func (n *Hub) ListenAndServeWebsocket(addr string) {
 			if token, ok := urlParams["token"]; ok {
 				params.Token = &token
 			}
-			if n.checkLogin != nil && !n.checkLogin(&params) {
-				return nil, errors.New("认证失败")
+			err = checkLogin(params)
+			if err != nil {
+				return nil, err
 			}
-			return &sessionData{
+			data := &SessionData{
 				ClientId:  params.ClientId,
 				NodeId:    params.BucketId,
 				SessionId: uuid.New().String(),
-			}, nil
+			}
+			n.createClient(conn, data)
+			return data, nil
 		},
 	}))
+	go ws.ListenAndServe()
+	return ws
+}
+
+func (n *Hub) ListenAndServeWebsocket(addr string) *WebsocketServer {
+	//websocket Server
+	ws := NewWebsocketServer(addr)
 	ws.OnClientConnect = func(conn *WebsocketConn) {
-		n.createClient(conn, conn.auth.(*sessionData))
+		n.createClient(conn, &SessionData{
+			ClientId:  uuid.New().String(),
+			SessionId: uuid.New().String(),
+		})
 	}
-	go ws.ListenAndServe(n.httpLogin)
+	go ws.ListenAndServe()
+	return ws
 }
 
 func (n *Hub) FindOrCreateBucket(id int64) *Bucket {
@@ -240,56 +274,13 @@ type HttpResp struct {
 	Message string      `json:"message,omitempty"`
 }
 
-// udp可以通过https安全的获得sessionId
-func (n *Hub) httpLogin(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		resp := &HttpResp{Code: 401, Message: "Body Read出错"}
-		data, _ := json.Marshal(resp)
-		w.Write(data)
-		return
-	}
-	var params LoginParams
-	err = json.Unmarshal(body, &params)
-	if err != nil {
-		resp := &HttpResp{Code: 401, Message: "Body Unmarshal出错"}
-		data, _ := json.Marshal(resp)
-		w.Write(data)
-		return
-	}
-	session, err := n.login(params)
-	if err != nil {
-		resp := &HttpResp{Code: 401, Message: "认证失败"}
-		data, _ := json.Marshal(resp)
-		w.Write(data)
-		return
-	}
-	resp := &HttpResp{Code: 200, Message: "登录成功", Data: session.SessionId}
-	data, _ := json.Marshal(resp)
-	w.Write(data)
-}
-
-// 返回sessionId
-func (n *Hub) login(params LoginParams) (*sessionData, error) {
-	if n.checkLogin != nil && !n.checkLogin(&params) {
-		return nil, errors.New("认证失败")
-	}
-	auth := &sessionData{NodeId: params.BucketId, ClientId: params.ClientId, SessionId: uuid.New().String()}
-	n.cacheSession.Store(auth.SessionId, auth)
+// 外部httpserver暂存
+func (n *Hub) TemptSaveSession(data SessionData) {
+	n.temptCacheSession.Store(data.SessionId, data)
 	go func() {
 		time.Sleep(time.Minute * 2)
-		n.cacheSession.Delete(auth.SessionId)
+		n.temptCacheSession.Delete(data.SessionId)
 	}()
-	return auth, nil
-}
-
-func (n *Hub) findCacheSession(sessionId string) (*sessionData, bool) {
-	value, ok := n.cacheSession.Load(sessionId)
-	if !ok {
-		return nil, false
-	}
-	data := value.(*sessionData)
-	return data, true
 }
 
 func (n *Hub) FindClient(clientId string) (*Client, bool) {
@@ -300,7 +291,7 @@ func (n *Hub) FindClient(clientId string) (*Client, bool) {
 	return client.(*Client), ok
 }
 
-func (n *Hub) createClient(conn IConn, data *sessionData) *Client {
+func (n *Hub) createClient(conn IConn, data *SessionData) *Client {
 	if client, ok := n.FindClient(data.ClientId); ok {
 		logger.Error(fmt.Sprintf("clientId【%v】已连接,关闭旧连接", data.ClientId))
 		client.Close()
@@ -329,7 +320,6 @@ func (n *Hub) createClient(conn IConn, data *sessionData) *Client {
 	client.sessionId = data.SessionId
 	client.handlerMgr = n.handlerMgr
 	n.clients.Store(data.ClientId, client)
-	n.usingSession.Store(data.SessionId, client)
 
 	if data.NodeId != nil {
 		bucket := n.FindOrCreateBucket(*data.NodeId)
@@ -339,13 +329,14 @@ func (n *Hub) createClient(conn IConn, data *sessionData) *Client {
 	}
 	client.OnDisconnect.AddEventListener(func(any interface{}) {
 		n.clients.Delete(data.ClientId)
-		n.usingSession.Delete(data.SessionId)
 	})
 	return client
 }
 
-type sessionData struct {
+type SessionData struct {
 	ClientId  string `json:"client_id"`
 	NodeId    *int64 `json:"node_id"`
 	SessionId string `json:"session_id,omitempty"`
 }
+
+type CheckLogin func(params LoginParams) error

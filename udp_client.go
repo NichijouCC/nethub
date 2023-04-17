@@ -77,6 +77,7 @@ func (n *UdpClient) StartReadWrite(heartbeatTimeout float64) {
 }
 
 func (n *UdpClient) SendMessage(msg []byte) error {
+	log.Println(string(msg))
 	n.sendChan <- []byte(fmt.Sprintf("%v@%v", string(msg), n.sessionId))
 	return nil
 }

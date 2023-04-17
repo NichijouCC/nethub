@@ -106,7 +106,7 @@ func TestClient_StreamRequest(t *testing.T) {
 
 func TestClientPing(t *testing.T) {
 	var projectId int64 = 53010217439105
-	client := DialHubTcp("127.0.0.1:1235", LoginParams{ClientId: uuid.New().String(), BucketId: &projectId})
+	client := DialHubTcp("127.0.0.1:1236", LoginParams{ClientId: uuid.New().String(), BucketId: &projectId})
 	client.OnLogin.AddEventListener(func(data interface{}) {
 		client.OnPongHandler = func(pkt *PongPacket) {
 			log.Println(*pkt)
