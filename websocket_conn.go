@@ -97,6 +97,10 @@ func (t *WebsocketConn) StartReadWrite() {
 						log.Printf("websocket server read error: %v", err)
 						t.OnError.RiseEvent(err)
 					}
+					if _, ok := err.(*websocket.CloseError); !ok {
+						log.Printf("websocket server read error: %v", err)
+						t.OnError.RiseEvent(err)
+					}
 					return
 				}
 				t.OnMessage.RiseEvent(msg)
