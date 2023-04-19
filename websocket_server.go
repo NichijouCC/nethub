@@ -16,9 +16,12 @@ type WebsocketServer struct {
 	clients    map[*WebsocketConn]struct{}
 	HttpServer *http.Server
 
-	PongWait     time.Duration
+	//默认值：(15 * time.Second * 8) / 10, ping间隔时间
 	PingInterval time.Duration
-	WriteWait    time.Duration
+	//默认值：15 * time.Second ,收到pong后等待下个pong的时间间隔
+	PongWait time.Duration
+	//默认值：0,SetWriteDeadline （now+writeWait）,如果writeWait=0,则忽略Deadline
+	WriteWait time.Duration
 
 	OnReceiveMessage   func(message []byte, conn *WebsocketConn)
 	OnError            func(err error)
