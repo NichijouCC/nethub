@@ -119,7 +119,9 @@ func (t *WebsocketConn) StartReadWrite() {
 				}
 			case <-ticker.C:
 				t.writeMtx.Lock()
-				t.Conn.SetWriteDeadline(time.Now().Add(t.WriteWait))
+				if t.WriteWait != 0 {
+					t.Conn.SetWriteDeadline(time.Now().Add(t.WriteWait))
+				}
 				if err := t.Conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
 					log.Println(fmt.Sprintf(`websocket write ping error:%v`, err.Error()))
 					t.writeMtx.Unlock()
@@ -136,7 +138,9 @@ func (t *WebsocketConn) writeOnePacket(msg []byte) error {
 	defer t.writeMtx.Unlock()
 	atomic.AddUint64(&WsWriteByte, uint64(len(msg)))
 	atomic.AddUint64(&WsWritePkts, 1)
-	t.Conn.SetWriteDeadline(time.Now().Add(t.WriteWait))
+	if t.WriteWait != 0 {
+		t.Conn.SetWriteDeadline(time.Now().Add(t.WriteWait))
+	}
 	return t.Conn.WriteMessage(1, msg)
 }
 
