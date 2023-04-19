@@ -31,6 +31,10 @@ type WebsocketConn struct {
 	isClosed bool
 	auth     interface{}
 
+	PongWait     time.Duration
+	PingInterval time.Duration
+	WriteWait    time.Duration
+
 	OnMessage    *EventTarget
 	OnError      *EventTarget
 	OnDisconnect *EventTarget
@@ -77,9 +81,9 @@ var WsWriteByte uint64
 func (t *WebsocketConn) StartReadWrite() {
 	go func() { //接收数据
 		defer t.Close()
-		t.Conn.SetReadDeadline(time.Now().Add(pongWait))
+		t.Conn.SetReadDeadline(time.Now().Add(t.PongWait))
 		t.Conn.SetPongHandler(func(appData string) error {
-			t.Conn.SetReadDeadline(time.Now().Add(pongWait))
+			t.Conn.SetReadDeadline(time.Now().Add(t.PongWait))
 			return nil
 		})
 		for {
@@ -102,7 +106,7 @@ func (t *WebsocketConn) StartReadWrite() {
 
 	go func() { //发送数据
 		defer t.Close()
-		ticker := time.NewTicker(pingInterval)
+		ticker := time.NewTicker(t.PingInterval)
 		for {
 			select {
 			case <-t.ctx.Done():
@@ -115,7 +119,7 @@ func (t *WebsocketConn) StartReadWrite() {
 				}
 			case <-ticker.C:
 				t.writeMtx.Lock()
-				t.Conn.SetWriteDeadline(time.Now().Add(writeWait))
+				t.Conn.SetWriteDeadline(time.Now().Add(t.WriteWait))
 				if err := t.Conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
 					log.Println(fmt.Sprintf(`websocket write ping error:%v`, err.Error()))
 					t.writeMtx.Unlock()
@@ -132,7 +136,7 @@ func (t *WebsocketConn) writeOnePacket(msg []byte) error {
 	defer t.writeMtx.Unlock()
 	atomic.AddUint64(&WsWriteByte, uint64(len(msg)))
 	atomic.AddUint64(&WsWritePkts, 1)
-	t.Conn.SetWriteDeadline(time.Now().Add(writeWait))
+	t.Conn.SetWriteDeadline(time.Now().Add(t.WriteWait))
 	return t.Conn.WriteMessage(1, msg)
 }
 

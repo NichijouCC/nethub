@@ -9,18 +9,16 @@ import (
 	"time"
 )
 
-var (
-	pongWait     = 60 * time.Second
-	pingInterval = (pongWait * 9) / 10
-	writeWait    = 3 * time.Second
-)
-
 type WebsocketServer struct {
 	Addr string
 	Opts *ServerOptions
 	sync.RWMutex
 	clients    map[*WebsocketConn]struct{}
 	HttpServer *http.Server
+
+	PongWait     time.Duration
+	PingInterval time.Duration
+	WriteWait    time.Duration
 
 	OnReceiveMessage   func(message []byte, conn *WebsocketConn)
 	OnError            func(err error)
@@ -34,9 +32,12 @@ func NewWebsocketServer(addr string, args ...func(opt *ServerOptions)) *Websocke
 		el(opts)
 	}
 	ws := &WebsocketServer{
-		Addr:    addr,
-		Opts:    opts,
-		clients: map[*WebsocketConn]struct{}{},
+		Addr:         addr,
+		Opts:         opts,
+		clients:      map[*WebsocketConn]struct{}{},
+		PongWait:     15 * time.Second,
+		PingInterval: (15 * time.Second * 8) / 10,
+		WriteWait:    0,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", ws.accept)
@@ -83,6 +84,9 @@ func (ws *WebsocketServer) accept(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	newConn := NewWebsocketConn(conn)
+	newConn.PingInterval = ws.PingInterval
+	newConn.PongWait = ws.PongWait
+	newConn.WriteWait = ws.WriteWait
 	newConn.auth = auth
 	newConn.OnMessage.AddEventListener(func(data interface{}) {
 		if ws.OnReceiveMessage != nil {
