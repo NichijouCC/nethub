@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
-	"go.uber.org/zap"
 	"log"
 	"net"
 	"sync"
@@ -82,14 +81,6 @@ var WsWriteByte uint64
 func (t *WebsocketConn) StartReadWrite() {
 	go func() { //接收数据
 		defer t.Close()
-		t.Conn.SetReadDeadline(time.Now().Add(t.PongWait))
-		t.Conn.SetPongHandler(func(appData string) error {
-			if t.EnableLog {
-				log.Println("收到pong消息", t.RemoteAddr().String(), time.Now().String())
-			}
-			t.Conn.SetReadDeadline(time.Now().Add(t.PongWait))
-			return nil
-		})
 		for {
 			select {
 			case <-t.ctx.Done():
@@ -105,6 +96,7 @@ func (t *WebsocketConn) StartReadWrite() {
 						log.Printf("websocket server read error: %v", err)
 						t.OnError.RiseEvent(err)
 					}
+					t.Conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4001, err.Error()), time.Now().Add(time.Second*3))
 					return
 				}
 				t.OnMessage.RiseEvent(msg)
@@ -114,7 +106,6 @@ func (t *WebsocketConn) StartReadWrite() {
 
 	go func() { //发送数据
 		defer t.Close()
-		ticker := time.NewTicker(t.PingInterval)
 		for {
 			select {
 			case <-t.ctx.Done():
@@ -123,25 +114,47 @@ func (t *WebsocketConn) StartReadWrite() {
 				if err := t.writeOnePacket(data); err != nil {
 					log.Println(fmt.Sprintf(`websocket write error:%v`, err.Error()))
 					t.OnError.RiseEvent(err)
+					t.Conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4001, err.Error()), time.Now().Add(time.Second*3))
 					return
 				}
-			case <-ticker.C:
-				t.writeMtx.Lock()
-				if t.WriteWait != 0 {
-					t.Conn.SetWriteDeadline(time.Now().Add(t.WriteWait))
-				}
-				if t.EnableLog {
-					log.Println("发送ping消息", t.RemoteAddr().String(), time.Now().String())
-				}
-				if err := t.Conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
-					log.Println(fmt.Sprintf(`websocket write ping error:%v`, err.Error()))
-					t.writeMtx.Unlock()
-					return
-				}
-				t.writeMtx.Unlock()
 			}
 		}
 	}()
+
+	if t.PingInterval > 0 {
+		t.Conn.SetReadDeadline(time.Now().Add(t.PongWait))
+		t.Conn.SetPongHandler(func(appData string) error {
+			if t.EnableLog {
+				log.Println("收到pong消息", t.RemoteAddr().String(), time.Now().String())
+			}
+			t.Conn.SetReadDeadline(time.Now().Add(t.PongWait))
+			return nil
+		})
+		go func() {
+			ticker := time.NewTicker(t.PingInterval)
+			for {
+				select {
+				case <-t.ctx.Done():
+					return
+				case <-ticker.C:
+					t.writeMtx.Lock()
+					if t.WriteWait != 0 {
+						t.Conn.SetWriteDeadline(time.Now().Add(t.WriteWait))
+					}
+					if t.EnableLog {
+						log.Println("发送ping消息", t.RemoteAddr().String(), time.Now().String())
+					}
+					if err := t.Conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
+						log.Println(fmt.Sprintf(`websocket write ping error:%v`, err.Error()))
+						t.Conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4001, err.Error()), time.Now().Add(time.Second*3))
+						t.writeMtx.Unlock()
+						return
+					}
+					t.writeMtx.Unlock()
+				}
+			}
+		}()
+	}
 }
 
 func (t *WebsocketConn) writeOnePacket(msg []byte) error {
@@ -167,7 +180,9 @@ func (t *WebsocketConn) SendMessage(message []byte) error {
 	case t.sendChan <- message:
 		return nil
 	default: //队列满了丢弃消息
-		logger.Warn("ws发送队列满了丢弃消息", zap.String("addr", t.RemoteAddr().String()))
+		if t.EnableLog {
+			log.Println(fmt.Sprintf("ws[%v]发送队列满了丢弃消息[%v]", t.RemoteAddr().String(), string(message)))
+		}
 		return nil
 	}
 }
