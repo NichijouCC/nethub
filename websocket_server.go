@@ -27,6 +27,8 @@ type WebsocketServer struct {
 	OnError            func(err error)
 	OnClientConnect    func(conn *WebsocketConn)
 	OnClientDisconnect func(conn *WebsocketConn)
+
+	EnableLog bool
 }
 
 func NewWebsocketServer(addr string, args ...func(opt *ServerOptions)) *WebsocketServer {
@@ -90,6 +92,7 @@ func (ws *WebsocketServer) accept(w http.ResponseWriter, r *http.Request) {
 	newConn.PingInterval = ws.PingInterval
 	newConn.PongWait = ws.PongWait
 	newConn.WriteWait = ws.WriteWait
+	newConn.EnableLog = ws.EnableLog
 	newConn.auth = auth
 	newConn.OnMessage.AddEventListener(func(data interface{}) {
 		if ws.OnReceiveMessage != nil {

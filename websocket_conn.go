@@ -34,6 +34,7 @@ type WebsocketConn struct {
 	PongWait     time.Duration
 	PingInterval time.Duration
 	WriteWait    time.Duration
+	EnableLog    bool
 
 	OnMessage    *EventTarget
 	OnError      *EventTarget
@@ -83,6 +84,9 @@ func (t *WebsocketConn) StartReadWrite() {
 		defer t.Close()
 		t.Conn.SetReadDeadline(time.Now().Add(t.PongWait))
 		t.Conn.SetPongHandler(func(appData string) error {
+			if t.EnableLog {
+				log.Println("收到pong消息", time.Now().String())
+			}
 			t.Conn.SetReadDeadline(time.Now().Add(t.PongWait))
 			return nil
 		})
@@ -125,6 +129,9 @@ func (t *WebsocketConn) StartReadWrite() {
 				t.writeMtx.Lock()
 				if t.WriteWait != 0 {
 					t.Conn.SetWriteDeadline(time.Now().Add(t.WriteWait))
+				}
+				if t.EnableLog {
+					log.Println("发送ping消息", time.Now().String())
 				}
 				if err := t.Conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
 					log.Println(fmt.Sprintf(`websocket write ping error:%v`, err.Error()))
