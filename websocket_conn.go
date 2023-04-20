@@ -85,7 +85,7 @@ func (t *WebsocketConn) StartReadWrite() {
 		t.Conn.SetReadDeadline(time.Now().Add(t.PongWait))
 		t.Conn.SetPongHandler(func(appData string) error {
 			if t.EnableLog {
-				log.Println("收到pong消息", time.Now().String())
+				log.Println("收到pong消息", t.RemoteAddr().String(), time.Now().String())
 			}
 			t.Conn.SetReadDeadline(time.Now().Add(t.PongWait))
 			return nil
@@ -131,7 +131,7 @@ func (t *WebsocketConn) StartReadWrite() {
 					t.Conn.SetWriteDeadline(time.Now().Add(t.WriteWait))
 				}
 				if t.EnableLog {
-					log.Println("发送ping消息", time.Now().String())
+					log.Println("发送ping消息", t.RemoteAddr().String(), time.Now().String())
 				}
 				if err := t.Conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
 					log.Println(fmt.Sprintf(`websocket write ping error:%v`, err.Error()))
