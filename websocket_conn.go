@@ -100,12 +100,13 @@ func (t *WebsocketConn) StartReadWrite() {
 					if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 						log.Printf("websocket server read error: %v", err)
 						t.OnError.RiseEvent(err)
+						return
 					}
 					if _, ok := err.(*websocket.CloseError); !ok {
 						log.Printf("websocket server read error: %v", err)
 						t.OnError.RiseEvent(err)
 					}
-					return
+					continue
 				}
 				t.OnMessage.RiseEvent(msg)
 			}
