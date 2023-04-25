@@ -23,12 +23,15 @@ type UdpClient struct {
 	isClosed bool
 }
 
+// UDP发送队列大小
+var UdpSendChanSize = 100
+
 func newUdpClient() *UdpClient {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &UdpClient{
 		ctx:          ctx,
 		cancel:       cancel,
-		sendChan:     make(chan []byte, maxQueueSize),
+		sendChan:     make(chan []byte, UdpSendChanSize),
 		OnMessage:    newEventTarget(),
 		OnError:      newEventTarget(),
 		OnDisconnect: newEventTarget(),

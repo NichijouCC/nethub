@@ -9,7 +9,6 @@ import (
 )
 
 const (
-	maxQueueSize  = 10000000
 	UDPPacketSize = 1024 * 4
 	packetBufSize = 1024 * 1024 // 1 MB
 )
@@ -54,14 +53,14 @@ func (u *UdpServer) ListenAndServe(listenerCount int) error {
 }
 
 type udpListener struct {
-	writeCh chan *writeMessage
-	conn    net.PacketConn
+	sendCh chan *writeMessage
+	conn   net.PacketConn
 }
 
 func newUdpListener(conn net.PacketConn, onMessage func(data []byte, conn *udpConn)) *udpListener {
 	listener := &udpListener{
-		writeCh: make(chan *writeMessage, maxQueueSize),
-		conn:    conn,
+		sendCh: make(chan *writeMessage, UdpSendChanSize),
+		conn:   conn,
 	}
 	go func() {
 		defer conn.Close()
@@ -83,7 +82,7 @@ func newUdpListener(conn net.PacketConn, onMessage func(data []byte, conn *udpCo
 		}
 	}()
 	go func() {
-		for m := range listener.writeCh {
+		for m := range listener.sendCh {
 			atomic.AddInt64(&UdpWriteQueue, -1)
 			n, err := conn.WriteTo(m.msg, m.addr)
 			if err != nil {
@@ -99,7 +98,7 @@ func newUdpListener(conn net.PacketConn, onMessage func(data []byte, conn *udpCo
 func (u *udpListener) sendMessage(data []byte, addr net.Addr) error {
 	atomic.AddInt64(&UdpWriteQueue, 1)
 	select {
-	case u.writeCh <- &writeMessage{msg: data, addr: addr}:
+	case u.sendCh <- &writeMessage{msg: data, addr: addr}:
 		return nil
 	default:
 		atomic.AddInt64(&UdpWriteQueue, -1)

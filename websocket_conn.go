@@ -60,12 +60,15 @@ func (t *WebsocketConn) GetAuth() interface{} {
 	return t.auth
 }
 
+// websocket缓冲size大小
+var WebsocketSendChanSize = 100
+
 func NewWebsocketConn(conn *websocket.Conn) *WebsocketConn {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &WebsocketConn{
 		Conn:         conn,
 		ctx:          ctx,
-		sendChan:     make(chan []byte, 10000),
+		sendChan:     make(chan []byte, WebsocketSendChanSize),
 		isClosed:     false,
 		cancel:       cancel,
 		id:           uuid.New().String(),

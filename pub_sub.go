@@ -18,12 +18,15 @@ type PubSub struct {
 	listeners []*TopicListener
 }
 
-func newPubSub() *PubSub {
+// 客户端发布队列大小
+var ClientPubChanSize = 1000
+
+func newPubSub(pubSize int) *PubSub {
 	center := &PubSub{
 		removeCh:  make(chan string, 1),
 		subCh:     make(chan *TopicListener, 1000),
 		unsubCh:   make(chan *TopicListener, 1000),
-		pubCh:     make(chan *PubTopic, maxQueueSize),
+		pubCh:     make(chan *PubTopic, pubSize),
 		clearCh:   make(chan struct{}, 1),
 		listeners: []*TopicListener{},
 	}

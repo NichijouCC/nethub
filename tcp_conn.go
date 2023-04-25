@@ -50,13 +50,16 @@ func (t *TcpConn) GetAuth() interface{} {
 	return t.auth
 }
 
+// tcp连接发送队列大小
+var TcpConnSendChanSize = 100
+
 // tcp连接管理
 func NewTcpConn(conn net.Conn) *TcpConn {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &TcpConn{
 		Conn:         conn,
 		ctx:          ctx,
-		sendChan:     make(chan []byte, 10000),
+		sendChan:     make(chan []byte, TcpConnSendChanSize),
 		isClosed:     false,
 		cancel:       cancel,
 		id:           uuid.New().String(),

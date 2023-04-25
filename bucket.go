@@ -13,11 +13,14 @@ type Bucket struct {
 	*PubSub
 }
 
+// bucket发布队列大小
+var BucketPubChanSize = 1000
+
 func newBucket(id int64, parent *Bucket) *Bucket {
 	bucket := &Bucket{
 		bucketId: id,
 		parent:   parent,
-		PubSub:   newPubSub(),
+		PubSub:   newPubSub(BucketPubChanSize),
 	}
 	return bucket
 }

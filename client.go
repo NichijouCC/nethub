@@ -57,6 +57,9 @@ type Client struct {
 	options     *ClientOptions
 }
 
+// 客户端消息(read后)处理队列缓冲大小
+var clientEnqueueChanSize = 100
+
 func newClient(clientId string, conn IConn, opts *ClientOptions) *Client {
 	client := &Client{
 		ClientId:        clientId,
@@ -65,9 +68,9 @@ func newClient(clientId string, conn IConn, opts *ClientOptions) *Client {
 		OnDisconnect:    newEventTarget(),
 		lastMessageTime: atomic.Value{},
 		packetHandler:   map[PacketTypeCode]func(pkt *Packet){},
-		enqueueCh:       make(chan *Packet, maxQueueSize),
+		enqueueCh:       make(chan *Packet, clientEnqueueChanSize),
 		handlerMgr:      &handlerMgr{},
-		PubSub:          newPubSub(),
+		PubSub:          newPubSub(ClientPubChanSize),
 		options:         opts,
 	}
 	client.ctx, client.cancel = context.WithCancelCause(context.Background())
