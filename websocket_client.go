@@ -9,7 +9,7 @@ import (
 )
 
 func DialHubWebsocket(addr string, params LoginParams) *Client {
-	var client = newClient(params.ClientId, nil, &ClientOptions{5, 5, 3})
+	var client = newClient(params.ClientId, nil, &SessionOptions{5, 5, 3})
 	values := url.Values{}
 	values.Set("client_id", params.ClientId)
 	if params.BucketId != nil {

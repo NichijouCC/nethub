@@ -53,14 +53,14 @@ func (u *UdpServer) ListenAndServe(listenerCount int) error {
 }
 
 type udpListener struct {
-	sendCh chan *writeMessage
-	conn   net.PacketConn
+	txQueue chan *writeMessage
+	conn    net.PacketConn
 }
 
 func newUdpListener(conn net.PacketConn, onMessage func(data []byte, conn *udpConn)) *udpListener {
 	listener := &udpListener{
-		sendCh: make(chan *writeMessage, UdpSendChanSize),
-		conn:   conn,
+		txQueue: make(chan *writeMessage, UdpTxQueueLen),
+		conn:    conn,
 	}
 	go func() {
 		defer conn.Close()
@@ -82,7 +82,7 @@ func newUdpListener(conn net.PacketConn, onMessage func(data []byte, conn *udpCo
 		}
 	}()
 	go func() {
-		for m := range listener.sendCh {
+		for m := range listener.txQueue {
 			atomic.AddInt64(&UdpWriteQueue, -1)
 			n, err := conn.WriteTo(m.msg, m.addr)
 			if err != nil {
@@ -98,7 +98,7 @@ func newUdpListener(conn net.PacketConn, onMessage func(data []byte, conn *udpCo
 func (u *udpListener) sendMessage(data []byte, addr net.Addr) error {
 	atomic.AddInt64(&UdpWriteQueue, 1)
 	select {
-	case u.sendCh <- &writeMessage{msg: data, addr: addr}:
+	case u.txQueue <- &writeMessage{msg: data, addr: addr}:
 		return nil
 	default:
 		atomic.AddInt64(&UdpWriteQueue, -1)

@@ -25,14 +25,6 @@ func (n *udpConn) Close() {
 
 }
 
-func (n *udpConn) IsClosed() bool {
-	return false
-}
-
-func (n *udpConn) ListenToOnDisconnect(f func(data interface{})) {
-
-}
-
 func (n *udpConn) ListenToOnMessage(f func(data interface{})) {
 
 }

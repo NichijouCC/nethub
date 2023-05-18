@@ -22,7 +22,7 @@ type TcpConn struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	id       string
-	sendChan chan []byte
+	txQueue  chan []byte
 	closeMu  sync.RWMutex
 	isClosed bool
 	auth     interface{}
@@ -51,7 +51,7 @@ func (t *TcpConn) GetAuth() interface{} {
 }
 
 // tcp连接发送队列大小
-var TcpConnSendChanSize = 100
+var TcpConnTxQueueLen = 100
 
 // tcp连接管理
 func NewTcpConn(conn net.Conn) *TcpConn {
@@ -59,7 +59,7 @@ func NewTcpConn(conn net.Conn) *TcpConn {
 	return &TcpConn{
 		Conn:         conn,
 		ctx:          ctx,
-		sendChan:     make(chan []byte, TcpConnSendChanSize),
+		txQueue:      make(chan []byte, TcpConnTxQueueLen),
 		isClosed:     false,
 		cancel:       cancel,
 		id:           uuid.New().String(),
@@ -100,7 +100,7 @@ func (t *TcpConn) StartReadWrite() {
 			select {
 			case <-t.ctx.Done():
 				return
-			case data := <-t.sendChan:
+			case data := <-t.txQueue:
 				//log.Println("tcp send:", string(data))
 				if err := packetWrite(t.Conn, data); err != nil {
 					log.Println(fmt.Sprintf(`TCP write error:%v`, err.Error()))
@@ -124,7 +124,7 @@ func (t *TcpConn) SendMessage(message []byte) error {
 	select {
 	case <-t.ctx.Done():
 		return nil
-	case t.sendChan <- message:
+	case t.txQueue <- message:
 		return nil
 	default:
 		return fmt.Errorf("tcp发送队列已满，丢弃消息,to:%v", t.RemoteAddr().String())

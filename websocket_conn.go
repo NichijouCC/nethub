@@ -22,10 +22,10 @@ func DialWebsocket(addr string) (*WebsocketConn, error) {
 }
 
 type WebsocketConn struct {
-	ctx      context.Context
-	cancel   context.CancelFunc
-	id       string
-	sendChan chan []byte
+	ctx     context.Context
+	cancel  context.CancelFunc
+	id      string
+	txQueue chan []byte
 	sync.RWMutex
 	isClosed bool
 	auth     interface{}
@@ -61,14 +61,14 @@ func (t *WebsocketConn) GetAuth() interface{} {
 }
 
 // websocket缓冲size大小
-var WebsocketSendChanSize = 100
+var WebsocketTxQueueLen = 100
 
 func NewWebsocketConn(conn *websocket.Conn) *WebsocketConn {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &WebsocketConn{
 		Conn:         conn,
 		ctx:          ctx,
-		sendChan:     make(chan []byte, WebsocketSendChanSize),
+		txQueue:      make(chan []byte, WebsocketTxQueueLen),
 		isClosed:     false,
 		cancel:       cancel,
 		id:           uuid.New().String(),
@@ -113,7 +113,7 @@ func (t *WebsocketConn) StartReadWrite() {
 			select {
 			case <-t.ctx.Done():
 				return
-			case data := <-t.sendChan:
+			case data := <-t.txQueue:
 				if err := t.writeOnePacket(data); err != nil {
 					log.Println(fmt.Sprintf(`websocket write error:%v`, err.Error()))
 					t.OnError.RiseEvent(err)
@@ -180,7 +180,7 @@ func (t *WebsocketConn) SendMessage(message []byte) error {
 	select {
 	case <-t.ctx.Done():
 		return errors.New("ws connection closed when send buff msg")
-	case t.sendChan <- message:
+	case t.txQueue <- message:
 		return nil
 	default: //队列满了丢弃消息
 		if t.EnableLog {

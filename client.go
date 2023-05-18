@@ -2,10 +2,13 @@ package nethub
 
 import (
 	"context"
+	"crypto/ecdh"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
+	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,10 +19,11 @@ import (
 var Enqueue int64 = 0
 var EnConsume int64 = 0
 
-type ClientOptions struct {
+type SessionOptions struct {
 	HeartbeatTimeout float64
-	RetryTimeout     float64
-	RetryInterval    float64
+	//等待Response
+	WaitTimeout   float64
+	RetryInterval float64
 }
 
 type Client struct {
@@ -35,9 +39,9 @@ type Client struct {
 	OnPingHandler      func(pkt *PingPacket)
 	OnPongHandler      func(pkt *PongPacket)
 	isClosed           atomic.Bool
-	lastMessageTime    atomic.Value
 
-	enqueueCh     chan *Packet
+	lastPktTime   atomic.Value
+	rxQueue       chan *Packet
 	packetHandler map[PacketTypeCode]func(pkt *Packet)
 
 	*handlerMgr
@@ -54,86 +58,86 @@ type Client struct {
 	properties sync.Map
 	*PubSub
 	OnBroadcast func(pkt *BroadcastPacket)
-	options     *ClientOptions
+	options     *SessionOptions
+
+	priKey *ecdh.PrivateKey
+	pubKey *ecdh.PublicKey
+	secret []byte
 }
 
 // 客户端消息(read后)处理队列缓冲大小
-var clientEnqueueChanSize = 100
+var RxQueueLen = 100
 
-func newClient(clientId string, conn IConn, opts *ClientOptions) *Client {
-	client := &Client{
-		ClientId:        clientId,
-		conn:            atomic.Value{},
-		OnLogin:         newEventTarget(),
-		OnDisconnect:    newEventTarget(),
-		lastMessageTime: atomic.Value{},
-		packetHandler:   map[PacketTypeCode]func(pkt *Packet){},
-		enqueueCh:       make(chan *Packet, clientEnqueueChanSize),
-		handlerMgr:      &handlerMgr{},
-		PubSub:          newPubSub(ClientPubChanSize),
-		options:         opts,
+func newClient(clientId string, conn IConn, opts *SessionOptions) *Client {
+	se := &Client{
+		ClientId:      clientId,
+		conn:          atomic.Value{},
+		OnLogin:       newEventTarget(),
+		OnDisconnect:  newEventTarget(),
+		lastPktTime:   atomic.Value{},
+		packetHandler: map[PacketTypeCode]func(pkt *Packet){},
+		rxQueue:       make(chan *Packet, RxQueueLen),
+		handlerMgr:    &handlerMgr{},
+		PubSub:        newPubSub(ClientPubChanSize),
+		options:       opts,
 	}
-	client.ctx, client.cancel = context.WithCancelCause(context.Background())
+	se.ctx, se.cancel = context.WithCancelCause(context.Background())
 	if conn != nil {
-		client.conn.Store(conn)
+		se.conn.Store(conn)
 	}
-	client.lastMessageTime.Store(time.Now())
+	se.lastPktTime.Store(time.Now())
 	//包处理
-	client.packetHandler[REQUEST_PACKET] = client.onReceiveRequest
-	client.packetHandler[ACK_PACKET] = client.onReceiveAck
-	client.packetHandler[RESPONSE_PACKET] = client.onReceiveResponse
-	client.packetHandler[PUBLISH_PACKET] = client.onReceivePublish
-	client.packetHandler[SUBSCRIBE_PACKET] = client.onReceiveSubscribe
-	client.packetHandler[UNSUBSCRIBE_PACKET] = client.onReceiveSubscribe
-	client.packetHandler[BROADCAST_PACKET] = client.onReceiveBroadcast
-	client.packetHandler[STREAM_REQUEST_PACKET] = client.onReceiveStreamRequest
-	client.packetHandler[STREAM_RESPONSE_PACKET] = client.onReceiveStreamResponse
-	client.packetHandler[STREAM_CLOSE_PACKET] = client.onReceiveCloseStream
-	client.packetHandler[PING_PACKET] = func(pkt *Packet) {
-		if client.OnPingHandler != nil {
-			client.OnPingHandler(pkt.PacketContent.(*PingPacket))
+	se.packetHandler[REQUEST_PACKET] = se.onReceiveRequest
+	se.packetHandler[ACK_PACKET] = se.onReceiveAck
+	se.packetHandler[RESPONSE_PACKET] = se.onReceiveResponse
+	se.packetHandler[PUBLISH_PACKET] = se.onReceivePublish
+	se.packetHandler[SUBSCRIBE_PACKET] = se.onReceiveSubscribe
+	se.packetHandler[UNSUBSCRIBE_PACKET] = se.onReceiveSubscribe
+	se.packetHandler[BROADCAST_PACKET] = se.onReceiveBroadcast
+	se.packetHandler[STREAM_REQUEST_PACKET] = se.onReceiveStreamRequest
+	se.packetHandler[STREAM_RESPONSE_PACKET] = se.onReceiveStreamResponse
+	se.packetHandler[STREAM_CLOSE_PACKET] = se.onReceiveCloseStream
+	se.packetHandler[PING_PACKET] = func(pkt *Packet) {
+		if se.OnPingHandler != nil {
+			se.OnPingHandler(pkt.PacketContent.(*PingPacket))
 		}
 		var content = PongPacket(*pkt.PacketContent.(*PingPacket))
-		client.SendPacket(&content)
+		se.SendPacket(&content)
 	}
-	client.packetHandler[PONG_PACKET] = func(pkt *Packet) {
-		if client.OnPongHandler != nil {
-			client.OnPongHandler(pkt.PacketContent.(*PongPacket))
+	se.packetHandler[PONG_PACKET] = func(pkt *Packet) {
+		if se.OnPongHandler != nil {
+			se.OnPongHandler(pkt.PacketContent.(*PongPacket))
 		}
 	}
 
 	go func() {
-		for pkt := range client.enqueueCh {
-			atomic.AddInt64(&Enqueue, -1)
-			atomic.AddInt64(&EnConsume, 1)
-			handler, ok := client.packetHandler[pkt.PacketType]
-			if !ok {
-				logger.Error("rpc通信包找不到handler", zap.Any("packet", string(pkt.RawData)))
-				return
+		ticker := time.NewTicker(time.Second)
+		for {
+			select {
+			case pkt := <-se.rxQueue:
+				atomic.AddInt64(&Enqueue, -1)
+				atomic.AddInt64(&EnConsume, 1)
+				handler, ok := se.packetHandler[pkt.PacketType]
+				if !ok {
+					logger.Error("rpc通信包找不到handler", zap.Any("packet", string(pkt.RawData)))
+					return
+				}
+				handler(pkt)
+			case <-ticker.C:
+				if time.Now().Sub(se.lastPktTime.Load().(time.Time)) > time.Millisecond*time.Duration(se.options.HeartbeatTimeout*1000*0.3) {
+					//logger.Warn(fmt.Sprintf("客户端【%v】无数据,发送PING.", m.ClientId))
+					var ping PingPacket = "PING"
+					se.SendPacket(&ping)
+				}
+				if time.Now().Sub(se.lastPktTime.Load().(time.Time)) > time.Millisecond*time.Duration(se.options.HeartbeatTimeout*1000) {
+					logger.Error(fmt.Sprintf("客户端【%v】超时无数据,断开连接.", se.ClientId))
+					se.Close()
+				}
 			}
-			handler(pkt)
 		}
 	}()
 
-	return client
-}
-
-func (m *Client) LoopCheckAlive() {
-	ticker := time.NewTicker(time.Second)
-	for range ticker.C {
-		if m.isClosed.Load() {
-			continue
-		}
-		if time.Now().Sub(m.lastMessageTime.Load().(time.Time)) > time.Millisecond*time.Duration(m.options.HeartbeatTimeout*1000*0.3) {
-			//logger.Warn(fmt.Sprintf("客户端【%v】无数据,发送PING.", m.ClientId))
-			var ping PingPacket = "PING"
-			m.SendPacket(&ping)
-		}
-		if time.Now().Sub(m.lastMessageTime.Load().(time.Time)) > time.Millisecond*time.Duration(m.options.HeartbeatTimeout*1000) {
-			logger.Error(fmt.Sprintf("客户端【%v】超时无数据,断开连接.", m.ClientId))
-			m.Close()
-		}
-	}
+	return se
 }
 
 func (m *Client) GetProperty(property string) (interface{}, bool) {
@@ -147,8 +151,8 @@ func (m *Client) SetProperty(property string, value interface{}) {
 func (m *Client) receivePacket(pkt *Packet) {
 	pkt.Client = m
 	atomic.AddInt64(&Enqueue, 1)
-	m.lastMessageTime.Store(time.Now())
-	m.enqueueCh <- pkt
+	m.lastPktTime.Store(time.Now())
+	m.rxQueue <- pkt
 }
 
 func (m *Client) onReceiveRequest(pkt *Packet) {
@@ -341,7 +345,7 @@ func (m *Client) Request(method string, params interface{}) (interface{}, error)
 	if value, loaded := m.pendingResp.LoadOrStore(pkt.Id, newFlyRequest()); !loaded {
 		request := value.(*flyPacket)
 		m.SendPacket(pkt)
-		timeout := time.After(time.Second * time.Duration(m.options.RetryTimeout))
+		timeout := time.After(time.Second * time.Duration(m.options.WaitTimeout))
 		for {
 			select {
 			case <-request.resultBack:
@@ -376,7 +380,7 @@ func (m *Client) RequestWithRetryByPacket(pkt *RequestPacket) (interface{}, erro
 		packet := packetCoder.marshal(pkt)
 		m.SendMessage(packet)
 		beAcked := false
-		timeout := time.After(time.Second * time.Duration(m.options.RetryTimeout))
+		timeout := time.After(time.Second * time.Duration(m.options.WaitTimeout))
 		for {
 			select {
 			case <-request.resultBack:
@@ -413,7 +417,7 @@ func (m *Client) SendPacketWithRetry(pkt INetPacket) error {
 		notify := value.(*flyPacket)
 		packet := packetCoder.marshal(pkt)
 		m.SendMessage(packet)
-		timeout := time.After(time.Second * time.Duration(m.options.RetryTimeout))
+		timeout := time.After(time.Second * time.Duration(m.options.WaitTimeout))
 		for {
 			select {
 			case <-notify.ackBack:
@@ -508,6 +512,26 @@ func (m *Client) SendPacket(packet INetPacket) error {
 
 func (m *Client) SendPacketDirect(packet INetPacket) error {
 	return m.SendMessageDirect(packetCoder.marshal(packet))
+}
+
+func (m *Client) generateEcdhKey() {
+	var err error
+	m.priKey, err = ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		log.Fatal("ecdh Generate private Key err:", err.Error())
+	}
+	m.pubKey = m.priKey.PublicKey()
+}
+
+func (m *Client) computeSessionSecrete(remotePubKey []byte) {
+	rpubkey, err := m.priKey.Curve().NewPublicKey(remotePubKey)
+	if err != nil {
+		log.Fatal("ecdh compute secrete err:", err.Error())
+	}
+	m.secret, err = m.priKey.ECDH(rpubkey)
+	if err != nil {
+		log.Fatal("ecdh compute secrete err:", err.Error())
+	}
 }
 
 func (m *Client) Close() {

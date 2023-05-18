@@ -162,7 +162,3 @@ func (s *TcpServer) handleClientDisconnect(conn *TcpConn) {
 		s.OnClientDisconnect(conn)
 	}
 }
-
-func newTcpListener(listener net.Listener) {
-
-}

@@ -85,6 +85,7 @@ func New(options *HubOptions) *Hub {
 	})
 	return r
 }
+
 func (n *Hub) ListenAndServeUdp(addr string, listenerCount int) {
 	//udp Server
 	udp := NewUdpServer(addr)
@@ -296,43 +297,57 @@ func (n *Hub) FindClient(clientId string) (*Client, bool) {
 func (n *Hub) createClient(conn IConn, data *SessionData) *Client {
 	if client, ok := n.FindClient(data.ClientId); ok {
 		logger.Error(fmt.Sprintf("clientId【%v】已连接,关闭旧连接", data.ClientId))
-		client.Close()
-	}
-
-	logger.Info("新增加客户端", zap.String("clientId", data.ClientId))
-	client := newClient(data.ClientId, conn, &ClientOptions{
-		HeartbeatTimeout: n.options.HeartbeatTimeout,
-		RetryTimeout:     n.options.RetryTimeout,
-		RetryInterval:    n.options.RetryInterval,
-	})
-	switch conn.(type) {
-	case *TcpConn, *WebsocketConn:
-		conn.ListenToOnDisconnect(func(i interface{}) {
-			client.Close()
-		})
-		conn.ListenToOnMessage(func(data interface{}) {
-			pkt, err := packetCoder.unmarshal(data.([]byte))
-			if err != nil {
-				logger.Error("net通信包解析出错", zap.Error(err), zap.Any("packet", string(data.([]byte))))
-				return
-			}
-			client.receivePacket(pkt)
-		})
-	}
-	client.sessionId = data.SessionId
-	client.handlerMgr = n.handlerMgr
-	n.clients.Store(data.ClientId, client)
-
-	if data.NodeId != nil {
-		bucket := n.FindOrCreateBucket(*data.NodeId)
-		bucket.AddClient(client)
+		client.conn.Load().(IConn).Close()
+		client.conn.Store(conn)
+		return client
 	} else {
-		n.AddClient(client)
+		logger.Info("新增加客户端", zap.String("clientId", data.ClientId))
+		client = newClient(data.ClientId, conn, &SessionOptions{
+			HeartbeatTimeout: n.options.HeartbeatTimeout,
+			WaitTimeout:      n.options.RetryTimeout,
+			RetryInterval:    n.options.RetryInterval,
+		})
+		switch conn.(type) {
+		case *TcpConn:
+			conn.ListenToOnMessage(func(data interface{}) {
+				pkt, err := packetCoder.unmarshal(data.([]byte))
+				if err != nil {
+					logger.Error("net通信包解析出错", zap.Error(err), zap.Any("packet", string(data.([]byte))))
+					return
+				}
+				client.receivePacket(pkt)
+			})
+			conn.(*TcpConn).ListenToOnDisconnect(func(i interface{}) {
+				client.ClearAllSubTopics()
+			})
+		case *WebsocketConn:
+			conn.ListenToOnMessage(func(data interface{}) {
+				pkt, err := packetCoder.unmarshal(data.([]byte))
+				if err != nil {
+					logger.Error("net通信包解析出错", zap.Error(err), zap.Any("packet", string(data.([]byte))))
+					return
+				}
+				client.receivePacket(pkt)
+			})
+			conn.(*WebsocketConn).ListenToOnDisconnect(func(i interface{}) {
+				client.ClearAllSubTopics()
+			})
+		}
+		client.sessionId = data.SessionId
+		client.handlerMgr = n.handlerMgr
+		n.clients.Store(data.ClientId, client)
+
+		if data.NodeId != nil {
+			bucket := n.FindOrCreateBucket(*data.NodeId)
+			bucket.AddClient(client)
+		} else {
+			n.AddClient(client)
+		}
+		client.OnDisconnect.AddEventListener(func(any interface{}) {
+			n.clients.Delete(data.ClientId)
+		})
+		return client
 	}
-	client.OnDisconnect.AddEventListener(func(any interface{}) {
-		n.clients.Delete(data.ClientId)
-	})
-	return client
 }
 
 type SessionData struct {

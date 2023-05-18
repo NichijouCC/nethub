@@ -15,7 +15,7 @@ type UdpClient struct {
 	cancel       context.CancelFunc
 	Conn         *net.UDPConn
 	sessionId    string
-	sendChan     chan []byte
+	txQueue      chan []byte
 	OnMessage    *EventTarget
 	OnError      *EventTarget
 	OnDisconnect *EventTarget
@@ -24,14 +24,14 @@ type UdpClient struct {
 }
 
 // UDP发送队列大小
-var UdpSendChanSize = 100
+var UdpTxQueueLen = 100
 
 func newUdpClient() *UdpClient {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &UdpClient{
 		ctx:          ctx,
 		cancel:       cancel,
-		sendChan:     make(chan []byte, UdpSendChanSize),
+		txQueue:      make(chan []byte, UdpTxQueueLen),
 		OnMessage:    newEventTarget(),
 		OnError:      newEventTarget(),
 		OnDisconnect: newEventTarget(),
@@ -68,7 +68,7 @@ func (n *UdpClient) StartReadWrite(heartbeatTimeout float64) {
 			select {
 			case <-n.ctx.Done():
 				return
-			case data := <-n.sendChan:
+			case data := <-n.txQueue:
 				if _, err := n.Conn.Write(data); err != nil {
 					log.Println(fmt.Sprintf(`udp write error:%v`, err.Error()))
 					n.OnError.RiseEvent(err)
@@ -81,7 +81,7 @@ func (n *UdpClient) StartReadWrite(heartbeatTimeout float64) {
 
 func (n *UdpClient) SendMessage(msg []byte) error {
 	log.Println(string(msg))
-	n.sendChan <- []byte(fmt.Sprintf("%v@%v", string(msg), n.sessionId))
+	n.txQueue <- []byte(fmt.Sprintf("%v@%v", string(msg), n.sessionId))
 	return nil
 }
 
@@ -136,9 +136,9 @@ func DialUdp(addr string) (*UdpClient, error) {
 }
 
 func DialHubUdp(addr string, params LoginParams) *Client {
-	var client = newClient(params.ClientId, nil, &ClientOptions{
+	var client = newClient(params.ClientId, nil, &SessionOptions{
 		HeartbeatTimeout: 5,
-		RetryTimeout:     5,
+		WaitTimeout:      5,
 		RetryInterval:    3,
 	})
 	var tryConn func()

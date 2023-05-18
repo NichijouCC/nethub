@@ -6,9 +6,9 @@ import (
 )
 
 func DialHubTcp(addr string, params LoginParams) *Client {
-	var client = newClient(params.ClientId, nil, &ClientOptions{
+	var client = newClient(params.ClientId, nil, &SessionOptions{
 		HeartbeatTimeout: 5,
-		RetryTimeout:     5,
+		WaitTimeout:      5,
 		RetryInterval:    3,
 	})
 	var tryConn func()

@@ -70,21 +70,21 @@ func newPubSub(pubSize int) *PubSub {
 	return center
 }
 
-func (web *PubSub) SubTopic(listener *TopicListener) {
-	web.subCh <- listener
+func (p *PubSub) SubTopic(listener *TopicListener) {
+	p.subCh <- listener
 }
 
-func (web *PubSub) UnsubTopic(topic string) {
-	web.unsubCh <- NewTopicListener(topic, nil)
+func (p *PubSub) UnsubTopic(topic string) {
+	p.unsubCh <- NewTopicListener(topic, nil)
 }
 
-func (web *PubSub) ClearAllSubTopics() {
-	web.clearCh <- struct{}{}
+func (p *PubSub) ClearAllSubTopics() {
+	p.clearCh <- struct{}{}
 }
 
-func (web *PubSub) PubTopic(pkt *PublishRawPacket, from *Client) {
+func (p *PubSub) PubTopic(pkt *PublishRawPacket, from *Client) {
 	atomic.AddInt64(&PubQueue, 1)
-	web.pubCh <- &PubTopic{pkt, from}
+	p.pubCh <- &PubTopic{pkt, from}
 }
 
 type PubTopic struct {
