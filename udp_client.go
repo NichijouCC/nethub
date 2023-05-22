@@ -136,7 +136,7 @@ func DialUdp(addr string) (*UdpClient, error) {
 }
 
 func DialHubUdp(addr string, params LoginParams) *Client {
-	var client = newClient(params.ClientId, nil, &SessionOptions{
+	var client = newClient(params.ClientId, nil, &ClientOptions{
 		HeartbeatTimeout: 5,
 		WaitTimeout:      5,
 		RetryInterval:    3,

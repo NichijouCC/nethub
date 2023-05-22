@@ -25,14 +25,14 @@ type Hub struct {
 	clients sync.Map
 	//bucketId->*NetBucket
 	buckets sync.Map
-	*Bucket
+	*Group
 	*handlerMgr
 	options *HubOptions
 }
 
 func New(options *HubOptions) *Hub {
 	r := &Hub{
-		Bucket:     newBucket(-1, nil),
+		Group:      newGroup(-1, nil),
 		handlerMgr: &handlerMgr{},
 		options:    options,
 	}
@@ -256,17 +256,17 @@ func (n *Hub) ListenAndServeWebsocket(addr string) *WebsocketServer {
 	return ws
 }
 
-func (n *Hub) FindOrCreateBucket(id int64) *Bucket {
+func (n *Hub) FindOrCreateGroup(id int64) *Group {
 	if value, loaded := n.buckets.Load(id); loaded {
-		return value.(*Bucket)
+		return value.(*Group)
 	}
-	value, _ := n.buckets.LoadOrStore(id, newBucket(id, n.Bucket))
-	return value.(*Bucket)
+	value, _ := n.buckets.LoadOrStore(id, newGroup(id, n.Group))
+	return value.(*Group)
 }
 
-func (n *Hub) FindBucket(id int64) (*Bucket, bool) {
+func (n *Hub) FindGroup(id int64) (*Group, bool) {
 	if value, loaded := n.buckets.Load(id); loaded {
-		return value.(*Bucket), true
+		return value.(*Group), true
 	}
 	return nil, false
 }
@@ -302,7 +302,7 @@ func (n *Hub) createClient(conn IConn, data *SessionData) *Client {
 		return client
 	} else {
 		logger.Info("新增加客户端", zap.String("clientId", data.ClientId))
-		client = newClient(data.ClientId, conn, &SessionOptions{
+		client = newClient(data.ClientId, conn, &ClientOptions{
 			HeartbeatTimeout: n.options.HeartbeatTimeout,
 			WaitTimeout:      n.options.RetryTimeout,
 			RetryInterval:    n.options.RetryInterval,
@@ -338,7 +338,7 @@ func (n *Hub) createClient(conn IConn, data *SessionData) *Client {
 		n.clients.Store(data.ClientId, client)
 
 		if data.NodeId != nil {
-			bucket := n.FindOrCreateBucket(*data.NodeId)
+			bucket := n.FindOrCreateGroup(*data.NodeId)
 			bucket.AddClient(client)
 		} else {
 			n.AddClient(client)

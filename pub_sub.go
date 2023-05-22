@@ -1,6 +1,7 @@
 package nethub
 
 import (
+	"context"
 	"go.uber.org/zap"
 	"strings"
 	"sync/atomic"
@@ -10,7 +11,7 @@ var PubQueue int64
 var PubConsume int64
 
 type PubSub struct {
-	removeCh  chan string
+	ctx       context.Context
 	subCh     chan *TopicListener
 	unsubCh   chan *TopicListener
 	pubCh     chan *PubTopic
@@ -18,14 +19,11 @@ type PubSub struct {
 	listeners []*TopicListener
 }
 
-// 客户端发布队列大小
-var ClientPubChanSize = 1000
-
-func newPubSub(pubSize int) *PubSub {
+func newPubSub(ctx context.Context, pubSize int) *PubSub {
 	center := &PubSub{
-		removeCh:  make(chan string, 1),
-		subCh:     make(chan *TopicListener, 1000),
-		unsubCh:   make(chan *TopicListener, 1000),
+		ctx:       ctx,
+		subCh:     make(chan *TopicListener, 100),
+		unsubCh:   make(chan *TopicListener, 100),
 		pubCh:     make(chan *PubTopic, pubSize),
 		clearCh:   make(chan struct{}, 1),
 		listeners: []*TopicListener{},
@@ -34,6 +32,8 @@ func newPubSub(pubSize int) *PubSub {
 	go func() {
 		for {
 			select {
+			case <-ctx.Done():
+				return
 			case sub := <-center.subCh:
 				beContain := false
 				for _, se := range center.listeners {

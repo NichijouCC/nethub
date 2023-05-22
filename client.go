@@ -2,13 +2,10 @@ package nethub
 
 import (
 	"context"
-	"crypto/ecdh"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
-	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,19 +16,22 @@ import (
 var Enqueue int64 = 0
 var EnConsume int64 = 0
 
-type SessionOptions struct {
+type ClientOptions struct {
 	HeartbeatTimeout float64
 	//等待Response
-	WaitTimeout   float64
+	WaitTimeout float64
+	//等待回复超时重试时间间隔
 	RetryInterval float64
+	//是否加密,ecdh+rc4
+	EnableCrypto bool
 }
 
 type Client struct {
 	ctx                context.Context
-	cancel             context.CancelCauseFunc
+	cancel             context.CancelFunc
 	ClientId           string
 	sessionId          string
-	Bucket             *Bucket
+	Bucket             *Group
 	conn               atomic.Value
 	OnLogin            *EventTarget
 	OnDisconnect       *EventTarget
@@ -58,18 +58,22 @@ type Client struct {
 	properties sync.Map
 	*PubSub
 	OnBroadcast func(pkt *BroadcastPacket)
-	options     *SessionOptions
+	options     *ClientOptions
 
-	priKey *ecdh.PrivateKey
-	pubKey *ecdh.PublicKey
-	secret []byte
+	crypto *Crypto
 }
 
 // 客户端消息(read后)处理队列缓冲大小
 var RxQueueLen = 100
 
-func newClient(clientId string, conn IConn, opts *SessionOptions) *Client {
+// 客户端发布队列大小
+var ClientPubChLen = 1000
+
+func newClient(clientId string, conn IConn, opts *ClientOptions) *Client {
+	ctx, cancel := context.WithCancel(context.Background())
 	se := &Client{
+		ctx:           ctx,
+		cancel:        cancel,
 		ClientId:      clientId,
 		conn:          atomic.Value{},
 		OnLogin:       newEventTarget(),
@@ -78,10 +82,12 @@ func newClient(clientId string, conn IConn, opts *SessionOptions) *Client {
 		packetHandler: map[PacketTypeCode]func(pkt *Packet){},
 		rxQueue:       make(chan *Packet, RxQueueLen),
 		handlerMgr:    &handlerMgr{},
-		PubSub:        newPubSub(ClientPubChanSize),
+		PubSub:        newPubSub(ctx, ClientPubChLen),
 		options:       opts,
 	}
-	se.ctx, se.cancel = context.WithCancelCause(context.Background())
+	if opts.EnableCrypto {
+		se.crypto = NewCrypto()
+	}
 	if conn != nil {
 		se.conn.Store(conn)
 	}
@@ -512,26 +518,6 @@ func (m *Client) SendPacket(packet INetPacket) error {
 
 func (m *Client) SendPacketDirect(packet INetPacket) error {
 	return m.SendMessageDirect(packetCoder.marshal(packet))
-}
-
-func (m *Client) generateEcdhKey() {
-	var err error
-	m.priKey, err = ecdh.P256().GenerateKey(rand.Reader)
-	if err != nil {
-		log.Fatal("ecdh Generate private Key err:", err.Error())
-	}
-	m.pubKey = m.priKey.PublicKey()
-}
-
-func (m *Client) computeSessionSecrete(remotePubKey []byte) {
-	rpubkey, err := m.priKey.Curve().NewPublicKey(remotePubKey)
-	if err != nil {
-		log.Fatal("ecdh compute secrete err:", err.Error())
-	}
-	m.secret, err = m.priKey.ECDH(rpubkey)
-	if err != nil {
-		log.Fatal("ecdh compute secrete err:", err.Error())
-	}
 }
 
 func (m *Client) Close() {

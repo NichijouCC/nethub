@@ -1,38 +1,44 @@
 package nethub
 
 import (
+	"context"
 	"fmt"
 	"sync"
 )
 
-type Bucket struct {
-	parent   *Bucket
+type Group struct {
+	ctx      context.Context
+	cancel   context.CancelFunc
+	parent   *Group
 	bucketId int64
 	//ClientId->*Client
 	clients sync.Map
 	*PubSub
 }
 
-// bucket发布队列大小
-var BucketPubChanSize = 1000
+// group发布队列大小
+var GroupPubChLen = 1000
 
-func newBucket(id int64, parent *Bucket) *Bucket {
-	bucket := &Bucket{
+func newGroup(id int64, parent *Group) *Group {
+	ctx, cancel := context.WithCancel(context.Background())
+	bucket := &Group{
+		ctx:      ctx,
+		cancel:   cancel,
 		bucketId: id,
 		parent:   parent,
-		PubSub:   newPubSub(BucketPubChanSize),
+		PubSub:   newPubSub(ctx, GroupPubChLen),
 	}
 	return bucket
 }
 
-func (m *Bucket) Broadcast(packet []byte) {
+func (m *Group) Broadcast(packet []byte) {
 	m.clients.Range(func(key, value any) bool {
 		value.(*Client).SendMessage(packet)
 		return true
 	})
 }
 
-func (m *Bucket) PubTopic(pkt *PublishRawPacket, from *Client) {
+func (m *Group) PubTopic(pkt *PublishRawPacket, from *Client) {
 	if m.parent != nil {
 		m.parent.PubTopic(&PublishRawPacket{
 			Id:       pkt.Id,
@@ -48,7 +54,7 @@ func (m *Bucket) PubTopic(pkt *PublishRawPacket, from *Client) {
 	})
 }
 
-func (m *Bucket) FindClient(id string) (*Client, bool) {
+func (m *Group) FindClient(id string) (*Client, bool) {
 	value, ok := m.clients.Load(id)
 	if !ok {
 		return nil, false
@@ -56,7 +62,7 @@ func (m *Bucket) FindClient(id string) (*Client, bool) {
 	return value.(*Client), true
 }
 
-func (m *Bucket) AddClient(client *Client) {
+func (m *Group) AddClient(client *Client) {
 	m.clients.Store(client.ClientId, client)
 	client.Bucket = m
 	m.PubTopic(&PublishRawPacket{Topic: "connect"}, client)
