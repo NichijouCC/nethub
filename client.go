@@ -59,8 +59,6 @@ type Client struct {
 	*PubSub
 	OnBroadcast func(pkt *BroadcastPacket)
 	options     *ClientOptions
-
-	crypto *Crypto
 }
 
 // 客户端消息(read后)处理队列缓冲大小
@@ -84,9 +82,6 @@ func newClient(clientId string, conn IConn, opts *ClientOptions) *Client {
 		handlerMgr:    &handlerMgr{},
 		PubSub:        newPubSub(ctx, ClientPubChLen),
 		options:       opts,
-	}
-	if opts.EnableCrypto {
-		se.crypto = NewCrypto()
 	}
 	if conn != nil {
 		se.conn.Store(conn)
@@ -383,7 +378,7 @@ func (m *Client) RequestWithRetryByPacket(pkt *RequestPacket) (interface{}, erro
 	}
 	if value, loaded := m.pendingResp.LoadOrStore(pkt.Id, newFlyRequest()); !loaded {
 		request := value.(*flyPacket)
-		packet := packetCoder.marshal(pkt)
+		packet := defaultCodec.Marshal(pkt)
 		m.SendMessage(packet)
 		beAcked := false
 		timeout := time.After(time.Second * time.Duration(m.options.WaitTimeout))
@@ -421,7 +416,7 @@ func (m *Client) SendPacketWithRetry(pkt INetPacket) error {
 	}
 	if value, loaded := m.pendingAck.LoadOrStore(pkt.GetId(), newFlyNotify()); !loaded {
 		notify := value.(*flyPacket)
-		packet := packetCoder.marshal(pkt)
+		packet := defaultCodec.Marshal(pkt)
 		m.SendMessage(packet)
 		timeout := time.After(time.Second * time.Duration(m.options.WaitTimeout))
 		for {
@@ -513,11 +508,11 @@ func (m *Client) SendMessageDirect(message []byte) error {
 }
 
 func (m *Client) SendPacket(packet INetPacket) error {
-	return m.SendMessage(packetCoder.marshal(packet))
+	return m.SendMessage(defaultCodec.Marshal(packet))
 }
 
 func (m *Client) SendPacketDirect(packet INetPacket) error {
-	return m.SendMessageDirect(packetCoder.marshal(packet))
+	return m.SendMessageDirect(defaultCodec.Marshal(packet))
 }
 
 func (m *Client) Close() {

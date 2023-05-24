@@ -86,15 +86,40 @@ func New(options *HubOptions) *Hub {
 	return r
 }
 
-func (n *Hub) ListenAndServeUdp(addr string, listenerCount int) {
+type HubServerOptions struct {
+	Codec ICodec
+}
+
+type HubServerOption func(opts *HubServerOptions)
+
+func WithHubServerOptions(codec ICodec) HubServerOption {
+	return func(opts *HubServerOptions) { opts.Codec = codec }
+}
+
+func (n *Hub) ListenAndServeUdp(addr string, listenerCount int, opts ...HubServerOption) {
+	var options HubServerOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+	if options.Codec == nil {
+		options.Codec = defaultCodec
+	}
 	//udp Server
 	udp := NewUdpServer(addr)
 	var addrToClient sync.Map
 	udp.OnReceiveMessage = func(rawData []byte, conn *udpConn) {
-		pkt, err := packetCoder.unmarshal(rawData)
+		payload, err := options.Codec.Unmarshal(rawData)
 		if err != nil {
-			logger.Error("net通信包解析出错", zap.Any("packet", string(rawData)))
+			logger.Error("net通信包解析出错", zap.Any("rawData", string(rawData)))
 			return
+		}
+
+		pkt := &Packet{
+			RawData:       rawData,
+			PacketType:    payload.(INetPacket).TypeCode(),
+			PacketContent: payload.(INetPacket),
+			Util:          "",
+			Client:        nil,
 		}
 		value, loaded := addrToClient.LoadOrStore(conn.Addr.String(), struct{}{})
 		if !loaded {
@@ -115,16 +140,32 @@ func (n *Hub) ListenAndServeUdp(addr string, listenerCount int) {
 }
 
 // 这个起的server会进行消息验证,需要自行构建一个httpServer提供登录接口,用于登录获得sessionId
-func (n *Hub) ListenAndServeUdpWithAuth(addr string, listenerCount int) *UdpServer {
+func (n *Hub) ListenAndServeUdpWithAuth(addr string, listenerCount int, opts ...HubServerOption) *UdpServer {
+	var options HubServerOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+	if options.Codec == nil {
+		options.Codec = defaultCodec
+	}
+
 	//udp Server
 	udp := NewUdpServer(addr)
 	//sessionId->*NetClient
 	var usingSession sync.Map
 	udp.OnReceiveMessage = func(rawData []byte, conn *udpConn) {
-		pkt, err := packetCoder.unmarshal(rawData)
+		payload, err := options.Codec.Unmarshal(rawData)
 		if err != nil {
-			logger.Error("net通信包解析出错", zap.Any("packet", string(rawData)))
+			logger.Error("net通信包解析出错", zap.Any("rawData", string(rawData)))
 			return
+		}
+
+		pkt := &Packet{
+			RawData:       rawData,
+			PacketType:    payload.(INetPacket).TypeCode(),
+			PacketContent: payload.(INetPacket),
+			Util:          "",
+			Client:        nil,
 		}
 		if pkt.Util != "" {
 			if value, loaded := usingSession.Load(pkt.Util); loaded {
@@ -150,7 +191,7 @@ func (n *Hub) ListenAndServeTcpWithAuth(addr string, listenerCount int, checkLog
 	tcp := NewTcpServer(addr, WithAuth(&authOptions{
 		Timeout: time.Second,
 		CheckFunc: func(first []byte, conn IConn) (interface{}, error) {
-			pkt, err := packetCoder.unmarshal(first)
+			pkt, err := defaultCodec.Unmarshal(first)
 			if err != nil {
 				logger.Error("net通信包解析出错", zap.Any("packet", string(first)))
 				return nil, errors.New("认证失败")
@@ -160,15 +201,15 @@ func (n *Hub) ListenAndServeTcpWithAuth(addr string, listenerCount int, checkLog
 				var params LoginParams
 				err = json.Unmarshal(req.Params, &params)
 				if err != nil {
-					conn.SendMessage(packetCoder.marshal(&ResponsePacket{Id: req.Id, Error: "认证失败"}))
+					conn.SendMessage(defaultCodec.Marshal(&ResponsePacket{Id: req.Id, Error: "认证失败"}))
 					return nil, errors.New("认证失败")
 				}
 				err = checkLogin(params)
 				if err != nil {
-					conn.SendMessage(packetCoder.marshal(&ResponsePacket{Id: req.Id, Error: "认证失败"}))
+					conn.SendMessage(defaultCodec.Marshal(&ResponsePacket{Id: req.Id, Error: "认证失败"}))
 					return nil, err
 				}
-				conn.SendMessage(packetCoder.marshal(&ResponsePacket{Id: req.Id, Result: "认证成功"}))
+				conn.SendMessage(defaultCodec.Marshal(&ResponsePacket{Id: req.Id, Result: "认证成功"}))
 				//创建client
 				data := &SessionData{
 					ClientId:  params.ClientId,
@@ -185,13 +226,40 @@ func (n *Hub) ListenAndServeTcpWithAuth(addr string, listenerCount int, checkLog
 	go tcp.ListenAndServe(listenerCount)
 }
 
-func (n *Hub) ListenAndServeTcp(addr string, listenerCount int) *TcpServer {
+func (n *Hub) ListenAndServeTcp(addr string, listenerCount int, opts ...HubServerOption) *TcpServer {
+	var options HubServerOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+	if options.Codec == nil {
+		options.Codec = defaultCodec
+	}
+
 	tcp := NewTcpServer(addr)
 	tcp.OnClientConnect = func(conn *TcpConn) {
 		//创建client
-		n.createClient(conn, &SessionData{
+		client := n.createClient(conn, &SessionData{
 			ClientId:  uuid.New().String(),
 			SessionId: uuid.New().String(),
+		})
+
+		conn.ListenToOnMessage(func(data interface{}) {
+			payload, err := options.Codec.Unmarshal(data.([]byte))
+			if err != nil {
+				logger.Error("net通信包解析出错", zap.Any("rawData", string(data.([]byte))))
+				return
+			}
+			pkt := &Packet{
+				RawData:       data.([]byte),
+				PacketType:    payload.(INetPacket).TypeCode(),
+				PacketContent: payload.(INetPacket),
+				Util:          "",
+				Client:        nil,
+			}
+			client.receivePacket(pkt)
+		})
+		conn.ListenToOnDisconnect(func(i interface{}) {
+			client.ClearAllSubTopics()
 		})
 	}
 	go tcp.ListenAndServe(listenerCount)
@@ -243,13 +311,39 @@ func (n *Hub) ListenAndServeWebsocketWithAuth(addr string, checkLogin CheckLogin
 	return ws
 }
 
-func (n *Hub) ListenAndServeWebsocket(addr string) *WebsocketServer {
+func (n *Hub) ListenAndServeWebsocket(addr string, opts ...HubServerOption) *WebsocketServer {
+	var options HubServerOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+	if options.Codec == nil {
+		options.Codec = defaultCodec
+	}
+
 	//websocket Server
 	ws := NewWebsocketServer(addr)
 	ws.OnClientConnect = func(conn *WebsocketConn) {
-		n.createClient(conn, &SessionData{
+		client := n.createClient(conn, &SessionData{
 			ClientId:  uuid.New().String(),
 			SessionId: uuid.New().String(),
+		})
+		conn.ListenToOnMessage(func(data interface{}) {
+			payload, err := options.Codec.Unmarshal(data.([]byte))
+			if err != nil {
+				logger.Error("net通信包解析出错", zap.Any("rawData", string(data.([]byte))))
+				return
+			}
+			pkt := &Packet{
+				RawData:       data.([]byte),
+				PacketType:    payload.(INetPacket).TypeCode(),
+				PacketContent: payload.(INetPacket),
+				Util:          "",
+				Client:        nil,
+			}
+			client.receivePacket(pkt)
+		})
+		conn.ListenToOnDisconnect(func(i interface{}) {
+			client.ClearAllSubTopics()
 		})
 	}
 	go ws.ListenAndServe()
@@ -307,32 +401,6 @@ func (n *Hub) createClient(conn IConn, data *SessionData) *Client {
 			WaitTimeout:      n.options.RetryTimeout,
 			RetryInterval:    n.options.RetryInterval,
 		})
-		switch conn.(type) {
-		case *TcpConn:
-			conn.ListenToOnMessage(func(data interface{}) {
-				pkt, err := packetCoder.unmarshal(data.([]byte))
-				if err != nil {
-					logger.Error("net通信包解析出错", zap.Error(err), zap.Any("packet", string(data.([]byte))))
-					return
-				}
-				client.receivePacket(pkt)
-			})
-			conn.(*TcpConn).ListenToOnDisconnect(func(i interface{}) {
-				client.ClearAllSubTopics()
-			})
-		case *WebsocketConn:
-			conn.ListenToOnMessage(func(data interface{}) {
-				pkt, err := packetCoder.unmarshal(data.([]byte))
-				if err != nil {
-					logger.Error("net通信包解析出错", zap.Error(err), zap.Any("packet", string(data.([]byte))))
-					return
-				}
-				client.receivePacket(pkt)
-			})
-			conn.(*WebsocketConn).ListenToOnDisconnect(func(i interface{}) {
-				client.ClearAllSubTopics()
-			})
-		}
 		client.sessionId = data.SessionId
 		client.handlerMgr = n.handlerMgr
 		n.clients.Store(data.ClientId, client)

@@ -59,7 +59,7 @@ func TestBroadcastToAround(t *testing.T) {
 
 			dataBytes, _ := json.Marshal(data)
 			broadcastRpc := RequestRawPacket{Method: "broadcast_to_around", Params: dataBytes}
-			packet := packetCoder.marshal(&broadcastRpc)
+			packet := defaultCodec.Marshal(&broadcastRpc)
 			rts = append(rts, packet)
 		}
 	}
@@ -131,7 +131,7 @@ func TestSendCommand(t *testing.T) {
 	}
 	rtBytes, _ := json.Marshal(command)
 	request2 := RequestRawPacket{Id: uuid.New().String(), Method: "speak_to", Params: rtBytes}
-	packet2 := packetCoder.marshal(&request2)
+	packet2 := defaultCodec.Marshal(&request2)
 	log.Println(string(packet2))
 	conn.Write(packet2)
 	buf := make([]byte, 1024*4)

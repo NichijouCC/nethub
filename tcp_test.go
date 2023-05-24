@@ -30,7 +30,7 @@ func TestTcpSendRtMessage(t *testing.T) {
 
 			//var projectId int64 = 53010217439105
 			request := RequestRawPacket{Method: "rt_message", Params: rtBytes}
-			packet := packetCoder.marshal(&request)
+			packet := defaultCodec.Marshal(&request)
 			rts = append(rts, packet)
 			conn.StartReadWrite()
 		}

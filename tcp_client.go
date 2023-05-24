@@ -22,7 +22,7 @@ func DialHubTcp(addr string, params LoginParams) *Client {
 			return
 		}
 		conn.OnMessage.AddEventListener(func(data interface{}) {
-			pkt, err := packetCoder.unmarshal(data.([]byte))
+			pkt, err := defaultCodec.Unmarshal(data.([]byte))
 			if err != nil {
 				logger.Error("net通信包解析出错", zap.Any("packet", string(data.([]byte))))
 				return
