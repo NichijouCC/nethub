@@ -6,7 +6,7 @@ import (
 )
 
 func DialHubTcp(addr string, params LoginParams) *Client {
-	var client = newClient(params.ClientId, nil, &ClientOptions{
+	var client = newClient(nil, &ClientOptions{
 		HeartbeatTimeout: 5,
 		WaitTimeout:      5,
 		RetryInterval:    3,
@@ -21,13 +21,9 @@ func DialHubTcp(addr string, params LoginParams) *Client {
 			tryConn()
 			return
 		}
+		client.conn = conn
 		conn.OnMessage.AddEventListener(func(data interface{}) {
-			pkt, err := defaultCodec.Unmarshal(data.([]byte))
-			if err != nil {
-				logger.Error("net通信包解析出错", zap.Any("packet", string(data.([]byte))))
-				return
-			}
-			client.receivePacket(pkt)
+			client.receiveMessage(data.([]byte))
 		})
 		conn.OnDisconnect.AddEventListener(func(data interface{}) {
 			logger.Error("Tcp断连.....")
@@ -36,7 +32,6 @@ func DialHubTcp(addr string, params LoginParams) *Client {
 			tryConn()
 		})
 		conn.StartReadWrite()
-		client.conn.Store(conn)
 		for {
 			if conn.IsClosed() {
 				return

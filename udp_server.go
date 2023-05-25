@@ -25,7 +25,7 @@ var UdpWriteByte uint64
 var UdpWriteQueue int64
 
 type UdpServer struct {
-	OnReceiveMessage func(data []byte, conn *udpConn)
+	OnReceiveMessage func(data []byte, addr net.Addr, lis *udpListener)
 	address          string
 }
 
@@ -43,9 +43,9 @@ func (u *UdpServer) ListenAndServe(listenerCount int) error {
 		if err != nil {
 			panic(err)
 		}
-		newUdpListener(c, func(data []byte, conn *udpConn) {
+		newUdpListener(c, func(data []byte, addr net.Addr, lis *udpListener) {
 			if u.OnReceiveMessage != nil {
-				u.OnReceiveMessage(data, conn)
+				u.OnReceiveMessage(data, addr, lis)
 			}
 		})
 	}
@@ -54,22 +54,22 @@ func (u *UdpServer) ListenAndServe(listenerCount int) error {
 
 type udpListener struct {
 	txQueue chan *writeMessage
-	conn    net.PacketConn
+	socket  net.PacketConn
 }
 
-func newUdpListener(conn net.PacketConn, onMessage func(data []byte, conn *udpConn)) *udpListener {
-	listener := &udpListener{
+func newUdpListener(socket net.PacketConn, onMessage func(data []byte, addr net.Addr, lis *udpListener)) *udpListener {
+	lis := &udpListener{
 		txQueue: make(chan *writeMessage, UdpTxQueueLen),
-		conn:    conn,
+		socket:  socket,
 	}
 	go func() {
-		defer conn.Close()
+		defer socket.Close()
 		buf := make([]byte, packetBufSize)
 		for {
 			if len(buf) < UDPPacketSize {
 				buf = make([]byte, packetBufSize, packetBufSize)
 			}
-			nBytes, addr, err := conn.ReadFrom(buf)
+			nBytes, addr, err := socket.ReadFrom(buf)
 			if err != nil {
 				log.Printf("udp read error %s", err)
 				continue
@@ -78,13 +78,13 @@ func newUdpListener(conn net.PacketConn, onMessage func(data []byte, conn *udpCo
 			buf = buf[nBytes:]
 			atomic.AddUint64(&UdpReadPkts, 1)
 			atomic.AddUint64(&UdpReadByte, uint64(nBytes))
-			onMessage(msg, &udpConn{addr, listener})
+			onMessage(msg, addr, lis)
 		}
 	}()
 	go func() {
-		for m := range listener.txQueue {
+		for m := range lis.txQueue {
 			atomic.AddInt64(&UdpWriteQueue, -1)
-			n, err := conn.WriteTo(m.msg, m.addr)
+			n, err := socket.WriteTo(m.msg, m.addr)
 			if err != nil {
 				log.Printf("udp write error %s", err)
 			}
@@ -92,7 +92,7 @@ func newUdpListener(conn net.PacketConn, onMessage func(data []byte, conn *udpCo
 			atomic.AddUint64(&UdpWriteByte, uint64(n))
 		}
 	}()
-	return listener
+	return lis
 }
 
 func (u *udpListener) sendMessage(data []byte, addr net.Addr) error {
@@ -107,6 +107,6 @@ func (u *udpListener) sendMessage(data []byte, addr net.Addr) error {
 }
 
 func (u *udpListener) sendDirectMessage(data []byte, addr net.Addr) error {
-	_, err := u.conn.WriteTo(data, addr)
+	_, err := u.socket.WriteTo(data, addr)
 	return err
 }

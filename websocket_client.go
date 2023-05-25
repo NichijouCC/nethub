@@ -9,7 +9,7 @@ import (
 )
 
 func DialHubWebsocket(addr string, params LoginParams) *Client {
-	var client = newClient(params.ClientId, nil, &ClientOptions{HeartbeatTimeout: 5, WaitTimeout: 5, RetryInterval: 3})
+	var client = newClient(nil, &ClientOptions{HeartbeatTimeout: 5, WaitTimeout: 5, RetryInterval: 3})
 	values := url.Values{}
 	values.Set("client_id", params.ClientId)
 	if params.BucketId != nil {
@@ -30,13 +30,9 @@ func DialHubWebsocket(addr string, params LoginParams) *Client {
 			tryConn()
 			return
 		}
+		client.conn = ws
 		ws.OnMessage.AddEventListener(func(data interface{}) {
-			pkt, err := defaultCodec.Unmarshal(data.([]byte))
-			if err != nil {
-				logger.Error("net通信包解析出错", zap.Any("packet", string(data.([]byte))))
-				return
-			}
-			client.receivePacket(pkt)
+			client.receiveMessage(data.([]byte))
 		})
 		ws.OnDisconnect.AddEventListener(func(data interface{}) {
 			logger.Error("websocket断连.....")
@@ -45,7 +41,6 @@ func DialHubWebsocket(addr string, params LoginParams) *Client {
 			tryConn()
 		})
 		ws.StartReadWrite()
-		client.conn.Store(ws)
 		client.OnLogin.RiseEvent(nil)
 	}
 	go tryConn()

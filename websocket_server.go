@@ -64,15 +64,15 @@ func (ws *WebsocketServer) ListenAndServe() error {
 }
 
 func (ws *WebsocketServer) accept(w http.ResponseWriter, r *http.Request) {
-	auth, err := interface{}(nil), error(nil)
-	if ws.Opts.Auth != nil {
+	var loginData []byte
+	if ws.Opts.Login != nil {
 		paramsMap := r.URL.Query()
 		params := map[string]string{}
 		for s, strings := range paramsMap {
 			params[s] = strings[0]
 		}
-		data, _ := json.Marshal(params)
-		auth, err = ws.Opts.Auth.CheckFunc(data, nil)
+		loginData, _ = json.Marshal(params)
+		err := ws.Opts.Login.CheckFunc(loginData, nil)
 		if err != nil {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
@@ -89,11 +89,11 @@ func (ws *WebsocketServer) accept(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	newConn := NewWebsocketConn(conn)
+	newConn.LoginData = loginData
 	newConn.PingInterval = ws.PingInterval
 	newConn.PongWait = ws.PongWait
 	newConn.WriteWait = ws.WriteWait
 	newConn.EnableLog = ws.EnableLog
-	newConn.auth = auth
 	newConn.OnMessage.AddEventListener(func(data interface{}) {
 		if ws.OnReceiveMessage != nil {
 			ws.OnReceiveMessage(data.([]byte), newConn)

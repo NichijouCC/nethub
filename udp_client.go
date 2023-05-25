@@ -20,7 +20,8 @@ type UdpClient struct {
 	OnError      *EventTarget
 	OnDisconnect *EventTarget
 	sync.RWMutex
-	isClosed bool
+	isClosed   bool
+	readBuffer []byte
 }
 
 // UDP发送队列大小
@@ -35,6 +36,7 @@ func newUdpClient() *UdpClient {
 		OnMessage:    newEventTarget(),
 		OnError:      newEventTarget(),
 		OnDisconnect: newEventTarget(),
+		readBuffer:   make([]byte, packetBufSize),
 	}
 }
 
@@ -90,6 +92,21 @@ func (n *UdpClient) SendMessageDirect(msg []byte) error {
 	return err
 }
 
+func (n *UdpClient) ReadMessage() ([]byte, error) {
+	if len(n.readBuffer) < UDPPacketSize {
+		n.readBuffer = make([]byte, packetBufSize, packetBufSize)
+	}
+	nBytes, _, err := n.Conn.ReadFrom(n.readBuffer) // 接收数据
+	if err != nil {
+		fmt.Println("read udp failed, err: ", err)
+		n.cancel()
+		return nil, err
+	}
+	msg := n.readBuffer[:nBytes]
+	n.readBuffer = n.readBuffer[nBytes:]
+	return msg, err
+}
+
 func (n *UdpClient) Close() {
 	n.Lock()
 	defer n.Unlock()
@@ -136,7 +153,7 @@ func DialUdp(addr string) (*UdpClient, error) {
 }
 
 func DialHubUdp(addr string, params LoginParams) *Client {
-	var client = newClient(params.ClientId, nil, &ClientOptions{
+	var client = newClient(nil, &ClientOptions{
 		HeartbeatTimeout: 5,
 		WaitTimeout:      5,
 		RetryInterval:    3,
@@ -151,6 +168,7 @@ func DialHubUdp(addr string, params LoginParams) *Client {
 			tryConn()
 			return
 		}
+		client.conn = conn
 		conn.OnDisconnect.AddEventListener(func(data interface{}) {
 			logger.Info("udp断开连接")
 			client.ClearAllSubTopics()
@@ -158,15 +176,9 @@ func DialHubUdp(addr string, params LoginParams) *Client {
 			tryConn()
 		})
 		conn.OnMessage.AddEventListener(func(data interface{}) {
-			pkt, err := defaultCodec.Unmarshal(data.([]byte))
-			if err != nil {
-				logger.Error("net通信包解析出错", zap.Any("packet", string(data.([]byte))))
-				return
-			}
-			client.receivePacket(pkt)
+			client.receiveMessage(data.([]byte))
 		})
 		conn.StartReadWrite(5)
-		client.conn.Store(conn)
 		for {
 			if conn.IsClosed() {
 				return

@@ -7,8 +7,6 @@ type IConn interface {
 	SendMessageDirect(msg []byte) error
 	//关闭
 	Close()
-	//获取auth信息,可为nil
-	GetAuth() interface{}
 
 	ListenToOnMessage(func(data interface{}))
 }

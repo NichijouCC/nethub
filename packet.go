@@ -4,17 +4,6 @@ import (
 	"encoding/json"
 )
 
-type Packet struct {
-	//原始pkt
-	RawData []byte
-	//pkt类型
-	PacketType PacketTypeCode
-	//pkt内容包
-	PacketContent INetPacket
-	Util          string
-	Client        *Client
-}
-
 type PacketTypeCode int
 
 const (

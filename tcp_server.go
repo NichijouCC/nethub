@@ -22,25 +22,27 @@ type TcpServer struct {
 	OnClientDisconnect func(conn *TcpConn)
 }
 
-type authOptions struct {
+type loginOptions struct {
 	Timeout   time.Duration
-	CheckFunc func(loginInfo []byte, conn IConn) (interface{}, error)
+	CheckFunc func(loginInfo []byte, conn IConn) error
 }
 
 type ServerOptions struct {
-	Tls  *tls.Config
-	Auth *authOptions
+	Tls   *tls.Config
+	Login *loginOptions
 }
 
-func WithTls(tls *tls.Config) func(opt *ServerOptions) {
+type ServerOption func(opt *ServerOptions)
+
+func WithTls(tls *tls.Config) ServerOption {
 	return func(opt *ServerOptions) {
 		opt.Tls = tls
 	}
 }
 
-func WithAuth(auth *authOptions) func(opt *ServerOptions) {
+func WithLogin(auth *loginOptions) ServerOption {
 	return func(opt *ServerOptions) {
-		opt.Auth = auth
+		opt.Login = auth
 	}
 }
 
@@ -85,8 +87,8 @@ func (s *TcpServer) ListenAndServe(listenerCount int) error {
 				go func() {
 					tcpConn := NewTcpConn(conn)
 					//检查认证数据包
-					if s.Opts.Auth != nil {
-						beOk, err := s.checkConnAuth(tcpConn, s.Opts.Auth)
+					if s.Opts.Login != nil {
+						beOk, err := s.checkConnAuth(tcpConn, s.Opts.Login)
 						if err != nil {
 							tcpConn.Close()
 							return
@@ -118,15 +120,16 @@ func (s *TcpServer) ListenAndServe(listenerCount int) error {
 	return nil
 }
 
-func (s *TcpServer) checkConnAuth(conn *TcpConn, config *authOptions) (bool, error) {
+func (s *TcpServer) checkConnAuth(conn *TcpConn, config *loginOptions) (bool, error) {
 	onEnd := make(chan struct{})
-	ok, err, authInfo := false, error(nil), []byte(nil)
+	ok, err, loginData := false, error(nil), []byte(nil)
 	go func() {
-		authInfo, err = conn.ReadOnePacket()
+		loginData, err = conn.ReadMessage()
 		if err != nil {
 			close(onEnd)
 		} else {
-			conn.auth, err = config.CheckFunc(authInfo, conn)
+			conn.LoginData = loginData
+			err = config.CheckFunc(loginData, conn)
 			if err != nil {
 				close(onEnd)
 			} else {

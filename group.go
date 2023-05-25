@@ -64,9 +64,9 @@ func (m *Group) FindClient(id string) (*Client, bool) {
 
 func (m *Group) AddClient(client *Client) {
 	m.clients.Store(client.ClientId, client)
-	client.Bucket = m
+	client.Group = m
 	m.PubTopic(&PublishRawPacket{Topic: "connect"}, client)
-	client.OnDisconnect.AddEventListener(func(data interface{}) {
+	client.OnDispose.AddEventListener(func(data interface{}) {
 		m.clients.Delete(client.ClientId)
 		m.PubTopic(&PublishRawPacket{Topic: "disconnect"}, client)
 	})

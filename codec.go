@@ -10,19 +10,11 @@ import (
 )
 
 type ICodec interface {
-	Marshal(packet interface{}) []byte
-	Unmarshal(src []byte) (interface{}, error)
+	Marshal(packet INetPacket) []byte
+	Unmarshal(src []byte) (INetPacket, error)
 }
 
 var defaultCodec = NewSimpleCodec()
-
-func Marshal(pkt INetPacket) []byte {
-	return defaultCodec.Marshal(pkt)
-}
-
-func Unmarshal(rawPacket []byte) (*Packet, error) {
-	return defaultCodec.Unmarshal(rawPacket)
-}
 
 // <type——code>@<content-data-string>
 type SimpleCodec struct {
@@ -95,31 +87,21 @@ func NewSimpleCodec() *SimpleCodec {
 	return &SimpleCodec{contentDecoder}
 }
 
-func (m *SimpleCodec) Unmarshal(rawPacket []byte) (*Packet, error) {
-	pkt := &Packet{}
-	pkt.RawData = rawPacket
+func (m *SimpleCodec) Unmarshal(rawPacket []byte) (INetPacket, error) {
 	packetStr := string(rawPacket)
 	strArr := strings.Split(packetStr, "@")
 	intCode, err := strconv.Atoi(strArr[0])
 	if err != nil {
 		return nil, errors.New("通信包头解析失败")
 	}
-	pkt.PacketType = PacketTypeCode(intCode)
-	unmarshal, ok := m.contentDecoder[pkt.PacketType]
+	unmarshal, ok := m.contentDecoder[PacketTypeCode(intCode)]
 	if !ok {
 		return nil, errors.New("通信包头解析失败")
 	}
 	if len(strArr) < 2 {
 		return nil, errors.New("通信包结构不对")
 	}
-	pkt.PacketContent, err = unmarshal([]byte(strArr[1]))
-	if err != nil {
-		return nil, errors.New("通信包体解析失败")
-	}
-	if len(strArr) >= 3 {
-		pkt.Util = strArr[2]
-	}
-	return pkt, nil
+	return unmarshal([]byte(strArr[1]))
 }
 
 func (m *SimpleCodec) Marshal(pkt INetPacket) []byte {

@@ -19,13 +19,13 @@ var TcpReadPkts uint64
 var TcpReadByte uint64
 
 type TcpConn struct {
-	ctx      context.Context
-	cancel   context.CancelFunc
-	id       string
-	txQueue  chan []byte
-	closeMu  sync.RWMutex
-	isClosed bool
-	auth     interface{}
+	ctx       context.Context
+	cancel    context.CancelFunc
+	id        string
+	txQueue   chan []byte
+	closeMu   sync.RWMutex
+	isClosed  bool
+	LoginData []byte
 
 	OnMessage    *EventTarget
 	OnError      *EventTarget
@@ -46,16 +46,14 @@ func (t *TcpConn) RemoteAddr() net.Addr {
 	return t.Conn.RemoteAddr()
 }
 
-func (t *TcpConn) GetAuth() interface{} {
-	return t.auth
-}
-
 // tcp连接发送队列大小
 var TcpConnTxQueueLen = 100
 
 // tcp连接管理
 func NewTcpConn(conn net.Conn) *TcpConn {
 	ctx, cancel := context.WithCancel(context.Background())
+	conn.(*net.TCPConn).SetKeepAlive(true)
+	conn.(*net.TCPConn).SetKeepAlivePeriod(20 * time.Second)
 	return &TcpConn{
 		Conn:         conn,
 		ctx:          ctx,
@@ -70,8 +68,11 @@ func NewTcpConn(conn net.Conn) *TcpConn {
 }
 
 func (t *TcpConn) StartReadWrite() {
-	t.Conn.(*net.TCPConn).SetKeepAlive(true)
-	t.Conn.(*net.TCPConn).SetKeepAlivePeriod(20 * time.Second)
+	t.StartRead()
+	t.StartWrite()
+}
+
+func (t *TcpConn) StartRead() {
 	go func() { //接收数据
 		defer t.Close()
 		for {
@@ -94,7 +95,9 @@ func (t *TcpConn) StartReadWrite() {
 			}
 		}
 	}()
+}
 
+func (t *TcpConn) StartWrite() {
 	go func() { //发送数据
 		for {
 			select {
@@ -112,11 +115,7 @@ func (t *TcpConn) StartReadWrite() {
 	}()
 }
 
-func (t *TcpConn) WriteOnePacket(msg []byte) error {
-	return packetWrite(t.Conn, msg)
-}
-
-func (t *TcpConn) ReadOnePacket() ([]byte, error) {
+func (t *TcpConn) ReadMessage() ([]byte, error) {
 	return packetRead(t.Conn)
 }
 

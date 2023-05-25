@@ -22,19 +22,21 @@ type ClientOptions struct {
 	WaitTimeout float64
 	//等待回复超时重试时间间隔
 	RetryInterval float64
-	//是否加密,ecdh+rc4
-	EnableCrypto bool
+	//编码解码器
+	Codec ICodec
+	//加密
+	Crypto *Crypto
 }
 
 type Client struct {
 	ctx                context.Context
 	cancel             context.CancelFunc
 	ClientId           string
-	sessionId          string
-	Bucket             *Group
-	conn               atomic.Value
+	Group              *Group
+	GroupId            *int64
+	conn               IConn
 	OnLogin            *EventTarget
-	OnDisconnect       *EventTarget
+	OnDispose          *EventTarget
 	OnHeartbeatTimeout *EventTarget
 	OnPingHandler      func(pkt *PingPacket)
 	OnPongHandler      func(pkt *PongPacket)
@@ -67,24 +69,21 @@ var RxQueueLen = 100
 // 客户端发布队列大小
 var ClientPubChLen = 1000
 
-func newClient(clientId string, conn IConn, opts *ClientOptions) *Client {
+func newClient(conn IConn, opts *ClientOptions) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 	se := &Client{
 		ctx:           ctx,
 		cancel:        cancel,
-		ClientId:      clientId,
-		conn:          atomic.Value{},
+		ClientId:      uuid.NewString(),
+		conn:          conn,
 		OnLogin:       newEventTarget(),
-		OnDisconnect:  newEventTarget(),
+		OnDispose:     newEventTarget(),
 		lastPktTime:   atomic.Value{},
 		packetHandler: map[PacketTypeCode]func(pkt *Packet){},
 		rxQueue:       make(chan *Packet, RxQueueLen),
 		handlerMgr:    &handlerMgr{},
 		PubSub:        newPubSub(ctx, ClientPubChLen),
 		options:       opts,
-	}
-	if conn != nil {
-		se.conn.Store(conn)
 	}
 	se.lastPktTime.Store(time.Now())
 	//包处理
@@ -149,7 +148,18 @@ func (m *Client) SetProperty(property string, value interface{}) {
 	m.properties.Store(property, value)
 }
 
-func (m *Client) receivePacket(pkt *Packet) {
+func (m *Client) receiveMessage(rawData []byte) {
+	payload, err := m.options.Codec.Unmarshal(rawData)
+	if err != nil {
+		logger.Error("net通信包解析出错", zap.Any("rawData", string(rawData)))
+		return
+	}
+	pkt := &Packet{
+		RawData:       rawData,
+		PacketType:    payload.(INetPacket).TypeCode(),
+		PacketContent: payload.(INetPacket),
+		Client:        nil,
+	}
 	pkt.Client = m
 	atomic.AddInt64(&Enqueue, 1)
 	m.lastPktTime.Store(time.Now())
@@ -187,7 +197,7 @@ func (m *Client) onReceiveRequest(pkt *Packet) {
 		}
 	} else {
 		if handler, ok := m.findRequestHandler(request.Method); ok {
-			handler(pkt)
+			handler(request, pkt.Client)
 		}
 	}
 }
@@ -221,10 +231,10 @@ func (m *Client) onReceivePublish(pkt *Packet) {
 	if request.Id != "" {
 		m.SendPacket(&AckPacket{Id: request.Id})
 	}
-	if m.Bucket != nil {
+	if m.Group != nil {
 		request.Topic = fmt.Sprintf("%v/%v", m.ClientId, request.Topic)
 		request.ClientId = m.ClientId
-		m.Bucket.PubTopic(request, m)
+		m.Group.PubTopic(request, m)
 	} else {
 		m.PubTopic(request, m)
 	}
@@ -270,8 +280,8 @@ func (m *Client) onReceiveBroadcast(pkt *Packet) {
 	if request.Id != "" {
 		m.SendPacket(&AckPacket{Id: request.Id})
 	}
-	if m.Bucket != nil {
-		m.Bucket.Broadcast(pkt.RawData)
+	if m.Group != nil {
+		m.Group.Broadcast(pkt.RawData)
 	} else if m.OnBroadcast != nil {
 		m.OnBroadcast(request)
 	}
@@ -500,11 +510,11 @@ func (m *Client) Login(params *LoginParams) (string, error) {
 }
 
 func (m *Client) SendMessage(message []byte) error {
-	return m.conn.Load().(IConn).SendMessage(message)
+	return m.conn.SendMessage(message)
 }
 
 func (m *Client) SendMessageDirect(message []byte) error {
-	return m.conn.Load().(IConn).SendMessageDirect(message)
+	return m.conn.SendMessageDirect(message)
 }
 
 func (m *Client) SendPacket(packet INetPacket) error {
@@ -521,9 +531,9 @@ func (m *Client) Close() {
 	}
 	m.isClosed.Store(true)
 	logger.Info("客户端断连", zap.String("clientId", m.ClientId))
-	m.OnDisconnect.RiseEvent(nil)
+	m.OnDispose.RiseEvent(nil)
 	m.ClearAllSubTopics()
-	m.conn.Load().(IConn).Close()
+	m.conn.Close()
 }
 
 func (m *Client) IsClosed() bool {
@@ -580,9 +590,9 @@ func (s streamHandler) execute(first *Packet, stream *Stream) error {
 	return executeErr
 }
 
-type requestHandler func(pkt *Packet) (interface{}, error)
+type requestHandler func(req *RequestRawPacket, client *Client) (interface{}, error)
 
-func (r requestHandler) execute(pkt *Packet) (interface{}, error) {
+func (r requestHandler) execute(req *RequestRawPacket, client *Client) (interface{}, error) {
 	var executeErr error
 	var result interface{}
 	func() {
@@ -592,7 +602,7 @@ func (r requestHandler) execute(pkt *Packet) (interface{}, error) {
 				fmt.Println("rpc execute exception:", err)
 			}
 		}()
-		result, executeErr = r(pkt)
+		result, executeErr = r(req, client)
 	}()
 	return result, executeErr
 }
