@@ -13,6 +13,8 @@ type Crypto struct {
 	pubKey  *ecdh.PublicKey
 	encoder *rc4.Cipher
 	decoder *rc4.Cipher
+	//0还未交换secret 1已交换secret 2使用secret
+	state int
 }
 
 func NewCrypto() *Crypto {

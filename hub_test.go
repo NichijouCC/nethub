@@ -15,9 +15,7 @@ func TestHub_ListenAndServe(t *testing.T) {
 	})
 	//hub.ListenAndServeUdp(":1234", 2)
 	//hub.ListenAndServeTcp(":1235", 2)
-	hub.ListenAndServeWebsocketWithAuth(":1555", func(params LoginParams) error {
-		return nil
-	})
+	hub.ListenAndServeWebsocket(":1555")
 	select {}
 }
 
@@ -28,11 +26,9 @@ func TestHub_RegisterRequestHandler(t *testing.T) {
 		RetryInterval:    3,
 	})
 	hub.ListenAndServeTcp(":1235", 2)
-	hub.RegisterRequestHandler("add", func(pkt *Packet) (interface{}, error) {
-		req := pkt.PacketContent.(*RequestRawPacket)
-		_ = req.Params
-		//todo
-		return nil, nil
+	hub.RegisterRequestHandler("add", func(req *RequestPacket, from *Client) (interface{}, error) {
+
+		return 2, nil
 	})
 }
 
@@ -85,13 +81,18 @@ func TestHub_subscribe(t *testing.T) {
 	})
 	hub.ListenAndServeTcp(":1235", 2)
 
-	hub.SubTopic(NewTopicListener("+/+/rt_message", func(pkt *PublishRawPacket, from *Client) {
+	hub.SubTopic(NewTopicListener("+/+/rt_message", func(pkt *PublishPacket, from *Client) {
 
 	}))
 }
 
 func TestJson(t *testing.T) {
-	req := RequestPacket{
+	type testReq struct {
+		Id     string
+		Method string
+		Params interface{}
+	}
+	req := testReq{
 		Id:     "123231",
 		Method: "tesst",
 		Params: map[string]interface{}{"a": 1},
@@ -110,7 +111,7 @@ func TestJson(t *testing.T) {
 	type TestUnMarshal2 struct {
 		Id     string
 		Method string
-		Params json.RawMessage
+		Params []byte
 	}
 	var test2 TestUnMarshal2
 	json.Unmarshal(reqBytes, &test2)
@@ -120,7 +121,7 @@ func TestJson(t *testing.T) {
 
 	log.Println(test2, params2)
 
-	req2 := RequestPacket{
+	req2 := testReq{
 		Id:     "123231",
 		Method: "tesst",
 		Params: "1231",

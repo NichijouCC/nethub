@@ -16,7 +16,7 @@ type ICodec interface {
 
 var defaultCodec = NewSimpleCodec()
 
-// <type——code>@<content-data-string>
+// <type_code>@<content_data_string>
 type SimpleCodec struct {
 	contentDecoder map[PacketTypeCode]func(packet []byte) (INetPacket, error)
 }
@@ -24,7 +24,7 @@ type SimpleCodec struct {
 func NewSimpleCodec() *SimpleCodec {
 	var contentDecoder = map[PacketTypeCode]func(packet []byte) (INetPacket, error){
 		REQUEST_PACKET: func(body []byte) (INetPacket, error) {
-			var req RequestRawPacket
+			var req RequestPacket
 			err := json.Unmarshal(body, &req)
 			return &req, err
 		},
@@ -39,7 +39,7 @@ func NewSimpleCodec() *SimpleCodec {
 			return &req, err
 		},
 		PUBLISH_PACKET: func(body []byte) (INetPacket, error) {
-			var req PublishRawPacket
+			var req PublishPacket
 			err := json.Unmarshal(body, &req)
 			return &req, err
 		},

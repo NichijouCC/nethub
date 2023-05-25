@@ -38,9 +38,9 @@ func (m *Group) Broadcast(packet []byte) {
 	})
 }
 
-func (m *Group) PubTopic(pkt *PublishRawPacket, from *Client) {
+func (m *Group) PubTopic(pkt *PublishPacket, from *Client) {
 	if m.parent != nil {
-		m.parent.PubTopic(&PublishRawPacket{
+		m.parent.PubTopic(&PublishPacket{
 			Id:       pkt.Id,
 			Topic:    fmt.Sprintf("%v/%v", m.bucketId, pkt.Topic),
 			Params:   pkt.Params,
@@ -65,9 +65,9 @@ func (m *Group) FindClient(id string) (*Client, bool) {
 func (m *Group) AddClient(client *Client) {
 	m.clients.Store(client.ClientId, client)
 	client.Group = m
-	m.PubTopic(&PublishRawPacket{Topic: "connect"}, client)
+	m.PubTopic(&PublishPacket{Topic: "connect"}, client)
 	client.OnDispose.AddEventListener(func(data interface{}) {
 		m.clients.Delete(client.ClientId)
-		m.PubTopic(&PublishRawPacket{Topic: "disconnect"}, client)
+		m.PubTopic(&PublishPacket{Topic: "disconnect"}, client)
 	})
 }

@@ -12,7 +12,8 @@ func TestClient_Request(t *testing.T) {
 	conn := DialHubTcp("127.0.0.1:1235", LoginParams{ClientId: uuid.New().String()})
 	conn.OnLogin.AddEventListener(func(data interface{}) {
 		//远程调用
-		result, err := conn.Request("load_data", map[string]interface{}{"a": 1, "b": 2})
+		param, _ := json.Marshal(map[string]interface{}{"a": 1, "b": 2})
+		result, err := conn.Request("load_data", param)
 		log.Println(result, err)
 	})
 }
@@ -21,7 +22,8 @@ func TestClient_RequestWithRetry(t *testing.T) {
 	conn := DialHubTcp("127.0.0.1:1235", LoginParams{ClientId: uuid.New().String()})
 	conn.OnLogin.AddEventListener(func(data interface{}) {
 		//远程调用
-		result, err := conn.RequestWithRetry("load_data", map[string]interface{}{"a": 1, "b": 2})
+		param, _ := json.Marshal(map[string]interface{}{"a": 1, "b": 2})
+		result, err := conn.RequestWithRetry("load_data", param)
 		log.Println(result, err)
 	})
 }
@@ -31,7 +33,7 @@ func TestClient_SubscribeAttributes(t *testing.T) {
 	client := DialHubTcp("127.0.0.1:1235", LoginParams{ClientId: uuid.New().String(), BucketId: &projectId})
 	client.OnLogin.AddEventListener(func(data interface{}) {
 		var gpsAtts = []string{"longitude", "latitude", "altitude", "yaw"}
-		client.SubscribeAttributes("+/rt_message", gpsAtts, func(data *PublishRawPacket, from *Client) {
+		client.SubscribeAttributes("+/rt_message", gpsAtts, func(data *PublishPacket, from *Client) {
 			log.Println(data.ClientId, string(data.Params))
 		})
 	})
@@ -42,7 +44,7 @@ func TestClient_Subscribe(t *testing.T) {
 	var projectId int64 = 53010217439105
 	client := DialHubTcp("127.0.0.1:1235", LoginParams{ClientId: uuid.New().String(), BucketId: &projectId})
 	client.OnLogin.AddEventListener(func(data interface{}) {
-		client.Subscribe("+/rt_message", func(data *PublishRawPacket, from *Client) {
+		client.Subscribe("+/rt_message", func(data *PublishPacket, from *Client) {
 			log.Println(data.ClientId, string(data.Params))
 		})
 	})
@@ -53,7 +55,7 @@ func TestClient_wesocket_Subscribe(t *testing.T) {
 	var projectId int64 = 53010217439105
 	client := DialHubWebsocket("ws://127.0.0.1:1555", LoginParams{ClientId: uuid.New().String(), BucketId: &projectId})
 	client.OnLogin.AddEventListener(func(data interface{}) {
-		client.Subscribe("+/rt_message", func(data *PublishRawPacket, from *Client) {
+		client.Subscribe("+/rt_message", func(data *PublishPacket, from *Client) {
 			log.Println(data.ClientId, string(data.Params))
 		})
 	})
@@ -67,7 +69,7 @@ func TestClient_Publish(t *testing.T) {
 		//模拟实时上报消息
 		ticker := time.NewTicker(time.Second)
 		for range ticker.C {
-			client.Publish("rt_message", `{"timestamp": 1671610334.1461706, "network_latency": 100.0, "longitude": 101.75232644, "latitude": 26.63366599, "altitude": 1116.06578656}`)
+			client.Publish("rt_message", []byte(`{"timestamp": 1671610334.1461706, "network_latency": 100.0, "longitude": 101.75232644, "latitude": 26.63366599, "altitude": 1116.06578656}`))
 		}
 	})
 	select {}

@@ -183,7 +183,7 @@ func DialHubUdp(addr string, params LoginParams) *Client {
 			if conn.IsClosed() {
 				return
 			}
-			conn.sessionId, err = client.Login(&params)
+			err = client.Login(&params)
 			if err != nil {
 				logger.Error("登录失败", zap.Error(err), zap.Any("login params", params))
 				time.Sleep(3 * time.Second)

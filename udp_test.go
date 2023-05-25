@@ -3,7 +3,6 @@ package nethub
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/google/uuid"
 	"log"
 	"net"
 	"testing"
@@ -58,7 +57,7 @@ func TestBroadcastToAround(t *testing.T) {
 			data["sn"] = sn
 
 			dataBytes, _ := json.Marshal(data)
-			broadcastRpc := RequestRawPacket{Method: "broadcast_to_around", Params: dataBytes}
+			broadcastRpc := RequestPacket{Method: "broadcast_to_around", Params: dataBytes}
 			packet := defaultCodec.Marshal(&broadcastRpc)
 			rts = append(rts, packet)
 		}
@@ -113,36 +112,13 @@ func TestRtMessage(t *testing.T) {
 		select {
 		case <-ticker.C:
 			for _, client := range clients {
-				client.SendPacket(&RequestPacket{Method: "rt_message", Params: rtMsgMap})
+				client.SendPacket(&RequestPacket{Method: "rt_message", Params: []byte(msgStr)})
 				pkt++
 			}
 		case <-logTicker.C:
 			fmt.Printf("Pkts %d\n", pkt)
 			pkt = 0
 		}
-	}
-}
-
-func TestSendCommand(t *testing.T) {
-	conn, _ := net.Dial("udp", ":1234")
-	var command = CallClientParams{
-		ClientId: "sn_0",
-		Message:  &RequestRawPacket{Id: uuid.New().String(), Method: "shut_down"},
-	}
-	rtBytes, _ := json.Marshal(command)
-	request2 := RequestRawPacket{Id: uuid.New().String(), Method: "speak_to", Params: rtBytes}
-	packet2 := defaultCodec.Marshal(&request2)
-	log.Println(string(packet2))
-	conn.Write(packet2)
-	buf := make([]byte, 1024*4)
-	for {
-		if len(buf) < UDPPacketSize {
-			buf = make([]byte, packetBufSize)
-		}
-		nbytes, _ := conn.Read(buf)
-		data := buf[:nbytes]
-		buf = buf[nbytes:]
-		log.Println(string(data))
 	}
 }
 

@@ -36,7 +36,7 @@ func DialHubTcp(addr string, params LoginParams) *Client {
 			if conn.IsClosed() {
 				return
 			}
-			_, err = client.Login(&params)
+			err = client.Login(&params)
 			if err != nil {
 				logger.Error("登录失败", zap.Error(err), zap.Any("login params", params))
 				time.Sleep(time.Second * 3)

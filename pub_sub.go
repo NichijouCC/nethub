@@ -82,19 +82,19 @@ func (p *PubSub) ClearAllSubTopics() {
 	p.clearCh <- struct{}{}
 }
 
-func (p *PubSub) PubTopic(pkt *PublishRawPacket, from *Client) {
+func (p *PubSub) PubTopic(pkt *PublishPacket, from *Client) {
 	atomic.AddInt64(&PubQueue, 1)
 	p.pubCh <- &PubTopic{pkt, from}
 }
 
 type PubTopic struct {
-	pkt  *PublishRawPacket
+	pkt  *PublishPacket
 	from *Client
 }
 
 type TopicListener struct {
 	topic       string
-	callBack    func(pkt *PublishRawPacket, from *Client)
+	callBack    func(pkt *PublishPacket, from *Client)
 	topicSplits []string
 	clientId    string
 }
@@ -117,7 +117,7 @@ func (t *TopicListener) Validate(pubTopic []string) bool {
 	return true
 }
 
-func NewTopicListener(topic string, callback func(pkt *PublishRawPacket, from *Client)) *TopicListener {
+func NewTopicListener(topic string, callback func(pkt *PublishPacket, from *Client)) *TopicListener {
 	return &TopicListener{
 		topic:       topic,
 		topicSplits: strings.Split(topic, "/"),

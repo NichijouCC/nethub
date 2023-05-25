@@ -40,9 +40,9 @@ func WithTls(tls *tls.Config) ServerOption {
 	}
 }
 
-func WithLogin(auth *loginOptions) ServerOption {
+func WithLogin(login *loginOptions) ServerOption {
 	return func(opt *ServerOptions) {
-		opt.Login = auth
+		opt.Login = login
 	}
 }
 

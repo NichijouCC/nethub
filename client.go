@@ -22,10 +22,12 @@ type ClientOptions struct {
 	WaitTimeout float64
 	//等待回复超时重试时间间隔
 	RetryInterval float64
-	//编码解码器
-	Codec ICodec
+	//整包的编码解码器
+	PacketCodec ICodec
 	//加密
 	Crypto *Crypto
+	//登录
+	NeedLogin bool
 }
 
 type Client struct {
@@ -149,9 +151,30 @@ func (m *Client) SetProperty(property string, value interface{}) {
 }
 
 func (m *Client) receiveMessage(rawData []byte) {
-	payload, err := m.options.Codec.Unmarshal(rawData)
+	var needExchangeSecret = false
+	crypto := m.options.Crypto
+	if crypto != nil {
+		switch crypto.state {
+		case 2:
+			crypto.Decode(rawData, rawData)
+		case 1:
+			crypto.Decode(rawData, rawData)
+			crypto.state = 2
+		case 0:
+			needExchangeSecret = true
+		}
+	}
+	payload, err := m.options.PacketCodec.Unmarshal(rawData)
 	if err != nil {
 		logger.Error("net通信包解析出错", zap.Any("rawData", string(rawData)))
+		return
+	}
+	if needExchangeSecret && (payload.TypeCode() != REQUEST_PACKET || payload.(*RequestPacket).Method != "exchange_secret") {
+		logger.Warn("client还未交互密钥,无效通信包", zap.Any("rawData", string(rawData)))
+		return
+	}
+	if m.options.NeedLogin && (payload.TypeCode() != REQUEST_PACKET || payload.(*RequestPacket).Method != "login") {
+		logger.Warn("client还未登录,无效通信包", zap.Any("rawData", string(rawData)))
 		return
 	}
 	pkt := &Packet{
@@ -167,7 +190,7 @@ func (m *Client) receiveMessage(rawData []byte) {
 }
 
 func (m *Client) onReceiveRequest(pkt *Packet) {
-	request := pkt.PacketContent.(*RequestRawPacket)
+	request := pkt.PacketContent.(*RequestPacket)
 	if request.Id != "" {
 		//收到请求就回复一个ack
 		m.SendPacket(&AckPacket{Id: request.Id})
@@ -181,7 +204,7 @@ func (m *Client) onReceiveRequest(pkt *Packet) {
 				if !ok {
 					resp.Error = "无法找到对应方法"
 				} else {
-					result, err := handler.execute(pkt)
+					result, err := handler.execute(request, m)
 					if err != nil {
 						logger.Error("request执行出错", zap.Error(err))
 						resp.Error = err.Error()
@@ -227,7 +250,7 @@ func (m *Client) onReceiveAck(pkt *Packet) {
 }
 
 func (m *Client) onReceivePublish(pkt *Packet) {
-	request := pkt.PacketContent.(*PublishRawPacket)
+	request := pkt.PacketContent.(*PublishPacket)
 	if request.Id != "" {
 		m.SendPacket(&AckPacket{Id: request.Id})
 	}
@@ -245,7 +268,7 @@ func (m *Client) onReceiveSubscribe(sub *Packet) {
 	if request.Id != "" {
 		m.SendPacket(&AckPacket{Id: request.Id})
 	}
-	m.SubTopic(NewTopicListener(request.Topic, func(pkt *PublishRawPacket, from *Client) {
+	m.SubTopic(NewTopicListener(request.Topic, func(pkt *PublishPacket, from *Client) {
 		if request.Attributes != nil {
 			var msg map[string]interface{}
 			err := json.Unmarshal(pkt.Params, &msg)
@@ -257,7 +280,7 @@ func (m *Client) onReceiveSubscribe(sub *Packet) {
 				filter[attribute] = msg[attribute]
 			}
 			params, _ := json.Marshal(filter)
-			pkt = &PublishRawPacket{Id: pkt.Id, Params: params, Topic: pkt.Topic, ClientId: pkt.ClientId}
+			pkt = &PublishPacket{Id: pkt.Id, Params: params, Topic: pkt.Topic, ClientId: pkt.ClientId}
 		}
 		if pkt.Id == "" {
 			m.SendPacket(pkt)
@@ -346,7 +369,7 @@ func (m *Client) onReceiveCloseStream(pkt *Packet) {
 }
 
 // 发送Request,等待回复或超时
-func (m *Client) Request(method string, params interface{}) (interface{}, error) {
+func (m *Client) Request(method string, params []byte) (interface{}, error) {
 	pkt := &RequestPacket{Id: uuid.New().String(), Method: method, Params: params}
 	if value, loaded := m.pendingResp.Load(pkt.Id); loaded {
 		request := value.(*flyPacket)
@@ -375,7 +398,7 @@ func (m *Client) Request(method string, params interface{}) (interface{}, error)
 }
 
 // 发送Request,重复发直到收到RequestAck或收到Request执行结果或超时(Request_timeout)
-func (m *Client) RequestWithRetry(method string, params interface{}) (interface{}, error) {
+func (m *Client) RequestWithRetry(method string, params []byte) (interface{}, error) {
 	return m.RequestWithRetryByPacket(&RequestPacket{Id: uuid.New().String(), Method: method, Params: params})
 }
 
@@ -450,21 +473,21 @@ func (m *Client) SendPacketWithRetry(pkt INetPacket) error {
 	}
 }
 
-func (m *Client) Publish(topic string, data interface{}) {
+func (m *Client) Publish(topic string, data []byte) {
 	m.SendPacket(&PublishPacket{Topic: topic, Params: data})
 }
 
-func (m *Client) PublishWithRetry(topic string, data interface{}) {
+func (m *Client) PublishWithRetry(topic string, data []byte) {
 	m.SendPacketWithRetry(&PublishPacket{Id: uuid.New().String(), Topic: topic, Params: data})
 }
 
-func (m *Client) Subscribe(topic string, callback func(data *PublishRawPacket, from *Client)) error {
+func (m *Client) Subscribe(topic string, callback func(data *PublishPacket, from *Client)) error {
 	id := uuid.New().String()
 	m.SubTopic(NewTopicListener(topic, callback))
 	return m.SendPacketWithRetry(&SubscribePacket{Id: id, Topic: topic})
 }
 
-func (m *Client) SubscribeAttributes(topic string, attributes []string, callback func(data *PublishRawPacket, from *Client)) error {
+func (m *Client) SubscribeAttributes(topic string, attributes []string, callback func(data *PublishPacket, from *Client)) error {
 	id := uuid.New().String()
 	m.SubTopic(NewTopicListener(topic, callback))
 	return m.SendPacketWithRetry(&SubscribePacket{Id: id, Topic: topic, Attributes: attributes})
@@ -477,7 +500,7 @@ func (m *Client) Unsubscribe(topic string) error {
 }
 
 // 发送Request,重复发直到收到RequestAck或收到Request执行结果或超时(Request_timeout)
-func (m *Client) StreamRequest(method string, params interface{}, execute func(stream *Stream) error) {
+func (m *Client) StreamRequest(method string, params []byte, execute func(stream *Stream) error) {
 	stream := newStream(uuid.New().String(), m)
 	m.handlingStream.Store(stream.Id, stream)
 	stream.Client.RequestWithRetry(method, params)
@@ -496,24 +519,17 @@ func (m *Client) StreamRequest(method string, params interface{}, execute func(s
 	}
 }
 
-func (m *Client) CallClient(params *CallClientParams) (interface{}, error) {
-	return m.RequestWithRetryByPacket(&RequestPacket{Id: uuid.New().String(), Method: "call_client", Params: params})
-}
-
-func (m *Client) Login(params *LoginParams) (string, error) {
-	pkt := &RequestPacket{Id: uuid.New().String(), Method: "login", Params: params}
-	sessionId, err := m.RequestWithRetryByPacket(pkt)
-	if err != nil {
-		return "", err
-	}
-	return sessionId.(string), nil
-}
-
 func (m *Client) SendMessage(message []byte) error {
+	if m.options.Crypto != nil && m.options.Crypto.state == 2 {
+		m.options.Crypto.Encode(message, message)
+	}
 	return m.conn.SendMessage(message)
 }
 
 func (m *Client) SendMessageDirect(message []byte) error {
+	if m.options.Crypto != nil && m.options.Crypto.state == 2 {
+		m.options.Crypto.Encode(message, message)
+	}
 	return m.conn.SendMessageDirect(message)
 }
 
@@ -523,6 +539,18 @@ func (m *Client) SendPacket(packet INetPacket) error {
 
 func (m *Client) SendPacketDirect(packet INetPacket) error {
 	return m.SendMessageDirect(defaultCodec.Marshal(packet))
+}
+
+// 客户端进行登录
+func (m *Client) Login(params *LoginParams) error {
+	data, _ := json.Marshal(params)
+	pkt := &RequestPacket{Id: uuid.New().String(), Method: "login", Params: data}
+	_, err := m.RequestWithRetryByPacket(pkt)
+	if err == nil {
+		m.ClientId = params.ClientId
+		m.GroupId = params.BucketId
+	}
+	return err
 }
 
 func (m *Client) Close() {
@@ -564,15 +592,13 @@ type RegisterServiceParams struct {
 	Method []string
 }
 
-type CallClientParams struct {
-	ClientId string
-	Message  *RequestRawPacket
+type LoginParams struct {
+	BucketId *int64 `json:"bucket_id"`
+	ClientId string `json:"client_id"`
 }
 
-type LoginParams struct {
-	Token    *string `json:"token"`
-	BucketId *int64  `json:"bucket_id"`
-	ClientId string  `json:"client_id"`
+type ExchangeSecretParams struct {
+	PubKey []byte `json:"pub_key"`
 }
 
 type streamHandler func(first *Packet, stream *Stream) error
@@ -590,9 +616,9 @@ func (s streamHandler) execute(first *Packet, stream *Stream) error {
 	return executeErr
 }
 
-type requestHandler func(req *RequestRawPacket, client *Client) (interface{}, error)
+type requestHandler func(req *RequestPacket, from *Client) (interface{}, error)
 
-func (r requestHandler) execute(req *RequestRawPacket, client *Client) (interface{}, error) {
+func (r requestHandler) execute(req *RequestPacket, client *Client) (interface{}, error) {
 	var executeErr error
 	var result interface{}
 	func() {

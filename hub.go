@@ -2,6 +2,7 @@ package nethub
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -35,15 +36,34 @@ func New(options *HubOptions) *Hub {
 		options:    options,
 	}
 
-	r.RegisterRequestHandler("login", func(req *RequestRawPacket, client *Client) (interface{}, error) {
+	r.RegisterRequestHandler("login", func(req *RequestPacket, client *Client) (interface{}, error) {
 		var params LoginParams
 		err := json.Unmarshal(req.Params, &params)
-		//todo
 		if err != nil {
 			return "失败", err
-		} else {
-			return "成功", nil
 		}
+		client.ClientId = params.ClientId
+		client.GroupId = params.BucketId
+		client.OnLogin.RiseEvent(nil)
+		r.onClientLogin(client)
+		return "成功", nil
+	})
+
+	r.RegisterRequestHandler("exchange_secret", func(req *RequestPacket, client *Client) (interface{}, error) {
+		var params ExchangeSecretParams
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return nil, fmt.Errorf("params unmarshal err:%v", err.Error())
+		}
+		if client.options.Crypto == nil {
+			return nil, errors.New("未启用加密通信")
+		}
+		pubkey, err := client.options.Crypto.ComputeSecret(params.PubKey)
+		if err != nil {
+			return nil, fmt.Errorf("交换密钥失败,secret出错:%v", err.Error())
+		}
+		client.options.Crypto.state = 1
+		return pubkey, nil
 	})
 
 	return r
@@ -89,7 +109,7 @@ func (n *Hub) ListenAndServeUdp(addr string, listenerCount int, opts ...HubServe
 				HeartbeatTimeout: n.options.HeartbeatTimeout,
 				WaitTimeout:      n.options.RetryTimeout,
 				RetryInterval:    n.options.RetryInterval,
-				Codec:            options.Codec,
+				PacketCodec:      options.Codec,
 				Crypto:           options.Crypto,
 			})
 			client.handlerMgr = n.handlerMgr
@@ -117,7 +137,7 @@ func (n *Hub) ListenAndServeTcp(addr string, listenerCount int, opts ...HubServe
 			HeartbeatTimeout: n.options.HeartbeatTimeout,
 			WaitTimeout:      n.options.RetryTimeout,
 			RetryInterval:    n.options.RetryInterval,
-			Codec:            options.Codec,
+			PacketCodec:      options.Codec,
 			Crypto:           options.Crypto,
 		})
 		client.handlerMgr = n.handlerMgr
@@ -148,7 +168,7 @@ func (n *Hub) ListenAndServeWebsocket(addr string, opts ...HubServerOption) *Web
 			HeartbeatTimeout: n.options.HeartbeatTimeout,
 			WaitTimeout:      n.options.RetryTimeout,
 			RetryInterval:    n.options.RetryInterval,
-			Codec:            options.Codec,
+			PacketCodec:      options.Codec,
 			Crypto:           options.Crypto,
 		})
 		client.handlerMgr = n.handlerMgr
