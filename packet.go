@@ -17,6 +17,7 @@ const (
 	BROADCAST_PACKET       PacketTypeCode = 7
 	PING_PACKET            PacketTypeCode = 10
 	PONG_PACKET            PacketTypeCode = 11
+	HEARTBEAT_PACKET       PacketTypeCode = 12
 	STREAM_REQUEST_PACKET  PacketTypeCode = 20
 	STREAM_RESPONSE_PACKET PacketTypeCode = 21
 	STREAM_CLOSE_PACKET    PacketTypeCode = 22
@@ -193,5 +194,15 @@ func (r *PongPacket) TypeCode() PacketTypeCode {
 }
 
 func (r *PongPacket) GetId() string {
+	return ""
+}
+
+type HeartbeatPacket string
+
+func (r *HeartbeatPacket) TypeCode() PacketTypeCode {
+	return HEARTBEAT_PACKET
+}
+
+func (r *HeartbeatPacket) GetId() string {
 	return ""
 }

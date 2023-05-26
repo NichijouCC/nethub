@@ -10,7 +10,9 @@ type IConn interface {
 	//关闭
 	Close()
 
-	RemoteAddr() net.Addr
+	IsClosed() bool
 	
+	RemoteAddr() net.Addr
+
 	ListenToOnMessage(func(data interface{}))
 }

@@ -7,8 +7,6 @@ import (
 	"net"
 	"sync"
 	"time"
-
-	"go.uber.org/zap"
 )
 
 type HubOptions struct {
@@ -44,6 +42,7 @@ func New(options *HubOptions) *Hub {
 		}
 		client.ClientId = params.ClientId
 		client.GroupId = params.BucketId
+		client.state.Store(LOGINED)
 		client.OnLogin.RiseEvent(nil)
 		r.onClientLogin(client)
 		return "成功", nil
@@ -62,7 +61,11 @@ func New(options *HubOptions) *Hub {
 		if err != nil {
 			return nil, fmt.Errorf("交换密钥失败,secret出错:%v", err.Error())
 		}
-		client.options.Crypto.state = 1
+		reqParams, _ := json.Marshal(&ExchangeSecretParams{PubKey: pubkey})
+		_, err = client.RequestWithRetryByPacket(&RequestPacket{Id: req.Id, Method: "exchange_secret", Params: reqParams})
+		if err == nil {
+			client.changeState(EXCHANGED_SECRET)
+		}
 		return pubkey, nil
 	})
 
@@ -112,6 +115,7 @@ func (n *Hub) ListenAndServeUdp(addr string, listenerCount int, opts ...HubServe
 				PacketCodec:      options.Codec,
 				Crypto:           options.Crypto,
 			})
+			client.state.Store(CONNECTED)
 			client.handlerMgr = n.handlerMgr
 
 			value, _ = addrToClient.LoadOrStore(addr, client)
@@ -140,6 +144,7 @@ func (n *Hub) ListenAndServeTcp(addr string, listenerCount int, opts ...HubServe
 			PacketCodec:      options.Codec,
 			Crypto:           options.Crypto,
 		})
+		client.state.Store(CONNECTED)
 		client.handlerMgr = n.handlerMgr
 
 		conn.ListenToOnMessage(func(data interface{}) {
@@ -171,6 +176,7 @@ func (n *Hub) ListenAndServeWebsocket(addr string, opts ...HubServerOption) *Web
 			PacketCodec:      options.Codec,
 			Crypto:           options.Crypto,
 		})
+		client.state.Store(CONNECTED)
 		client.handlerMgr = n.handlerMgr
 
 		conn.ListenToOnMessage(func(data interface{}) {
@@ -219,10 +225,8 @@ func (n *Hub) FindClient(clientId string) (*Client, bool) {
 func (n *Hub) onClientLogin(new *Client) {
 	if client, ok := n.FindClient(new.ClientId); ok {
 		logger.Error(fmt.Sprintf("clientId【%v】已连接,关闭旧连接", new.ClientId))
-		client.Close()
+		client.Dispose()
 	}
-	logger.Info("新增加客户端", zap.String("clientId", new.ClientId))
-	n.clients.Store(new.ClientId, new)
 
 	if new.GroupId != nil {
 		group := n.FindOrCreateGroup(*new.GroupId)
@@ -230,9 +234,6 @@ func (n *Hub) onClientLogin(new *Client) {
 	} else {
 		n.AddClient(new)
 	}
-	new.OnDispose.AddEventListener(func(any interface{}) {
-		n.clients.Delete(new.ClientId)
-	})
 }
 
 type SessionData struct {

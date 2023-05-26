@@ -162,6 +162,7 @@ func DialHubUdp(addr string, params LoginParams) *Client {
 		WaitTimeout:      5,
 		RetryInterval:    3,
 	})
+	client.beClient.Store(true)
 	var tryConn func()
 	tryConn = func() {
 		logger.Info("Try进行udp连接..", zap.Any("addr", addr))

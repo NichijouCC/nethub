@@ -3,6 +3,7 @@ package nethub
 import (
 	"context"
 	"fmt"
+	"go.uber.org/zap"
 	"sync"
 )
 
@@ -63,6 +64,7 @@ func (m *Group) FindClient(id string) (*Client, bool) {
 }
 
 func (m *Group) AddClient(client *Client) {
+	logger.Info("新增加客户端", zap.String("clientId", client.ClientId))
 	m.clients.Store(client.ClientId, client)
 	client.Group = m
 	m.PubTopic(&PublishPacket{Topic: "connect"}, client)

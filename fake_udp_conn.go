@@ -2,11 +2,13 @@ package nethub
 
 import (
 	"net"
+	"sync/atomic"
 )
 
 type fakeUdpConn struct {
 	Addr     net.Addr
 	listener *udpListener
+	beClosed atomic.Bool
 }
 
 func (n *fakeUdpConn) SendMessage(msg []byte) error {
@@ -22,7 +24,11 @@ func (n *fakeUdpConn) GetAuth() interface{} {
 }
 
 func (n *fakeUdpConn) Close() {
+	n.beClosed.Store(true)
+}
 
+func (n *fakeUdpConn) IsClosed() bool {
+	return n.beClosed.Load()
 }
 
 func (n *fakeUdpConn) RemoteAddr() net.Addr {

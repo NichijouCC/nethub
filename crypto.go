@@ -40,7 +40,7 @@ func (c *Crypto) ComputeSecret(remotePubKey []byte) ([]byte, error) {
 
 // 加密
 func (c *Crypto) Encode(src []byte, dst []byte) {
-	c.encoder.XORKeyStream(src, src)
+	c.encoder.XORKeyStream(src, dst)
 }
 
 // 加密

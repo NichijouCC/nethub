@@ -10,6 +10,7 @@ import (
 
 func DialHubWebsocket(addr string, params LoginParams) *Client {
 	var client = newClient(nil, &ClientOptions{HeartbeatTimeout: 5, WaitTimeout: 5, RetryInterval: 3})
+	client.beClient.Store(true)
 	values := url.Values{}
 	values.Set("client_id", params.ClientId)
 	if params.BucketId != nil {
@@ -28,10 +29,12 @@ func DialHubWebsocket(addr string, params LoginParams) *Client {
 			return
 		}
 		client.conn = ws
+		client.changeState(CONNECTED)
 		ws.OnMessage.AddEventListener(func(data interface{}) {
 			client.receiveMessage(data.([]byte))
 		})
 		ws.OnDisconnect.AddEventListener(func(data interface{}) {
+			client.changeState(DISCONNECT)
 			logger.Error("websocket断连.....")
 			client.ClearAllSubTopics()
 			time.Sleep(time.Second * 3)

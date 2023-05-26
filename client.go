@@ -31,9 +31,21 @@ type ClientOptions struct {
 	NeedLogin bool
 }
 
+type clientState string
+
+var (
+	DISCONNECT       clientState = "DISCONNECT"
+	CONNECTED        clientState = "CONNECTED"
+	EXCHANGED_SECRET clientState = "EXCHANGED_SECRET"
+	LOGINED          clientState = "LOGINED"
+	DISPOSED         clientState = "DISPOSED"
+)
+
 type Client struct {
-	ctx                context.Context
-	cancel             context.CancelFunc
+	ctx    context.Context
+	cancel context.CancelFunc
+	//是否是客户端
+	beClient           atomic.Bool
 	ClientId           string
 	Group              *Group
 	GroupId            *int64
@@ -43,11 +55,13 @@ type Client struct {
 	OnHeartbeatTimeout *EventTarget
 	OnPingHandler      func(pkt *PingPacket)
 	OnPongHandler      func(pkt *PongPacket)
-	isClosed           atomic.Bool
+	beDisposed         atomic.Bool
+	state              atomic.Value
 
-	lastPktTime   atomic.Value
 	rxQueue       chan *Packet
+	lastRxTime    atomic.Value
 	packetHandler map[PacketTypeCode]func(pkt *Packet)
+	lastTxTime    atomic.Value
 
 	*handlerMgr
 	//正在处理的request,struct{}
@@ -80,18 +94,22 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 	cli := &Client{
 		ctx:           ctx,
 		cancel:        cancel,
+		beClient:      atomic.Bool{},
+		state:         atomic.Value{},
 		ClientId:      uuid.NewString(),
 		conn:          conn,
 		OnLogin:       newEventTarget(),
 		OnDispose:     newEventTarget(),
-		lastPktTime:   atomic.Value{},
+		lastRxTime:    atomic.Value{},
 		packetHandler: map[PacketTypeCode]func(pkt *Packet){},
 		rxQueue:       make(chan *Packet, RxQueueLen),
 		handlerMgr:    &handlerMgr{},
 		PubSub:        newPubSub(ctx, ClientPubChLen),
 		options:       opts,
 	}
-	cli.lastPktTime.Store(time.Now())
+	cli.state.Store(DISCONNECT)
+	cli.beClient.Store(false)
+	cli.lastRxTime.Store(time.Now())
 	//包处理
 	cli.packetHandler[REQUEST_PACKET] = cli.onReceiveRequest
 	cli.packetHandler[ACK_PACKET] = cli.onReceiveAck
@@ -115,6 +133,7 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 			cli.OnPongHandler(pkt.PacketContent.(*PongPacket))
 		}
 	}
+	cli.packetHandler[HEARTBEAT_PACKET] = func(pkt *Packet) {}
 
 	go func() {
 		ticker := time.NewTicker(time.Second)
@@ -132,15 +151,27 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 				}
 				handler(pkt)
 			case <-ticker.C:
-				if time.Now().Sub(cli.lastPktTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000*0.3) {
-					//logger.Warn(fmt.Sprintf("客户端【%v】无数据,发送PING.", m.ClientId))
-					var ping PingPacket = "PING"
-					cli.SendPacket(&ping)
+				switch cli.state.Load().(clientState) {
+				case CONNECTED, EXCHANGED_SECRET, LOGINED:
+					if time.Now().Sub(cli.lastRxTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000) {
+						if cli.beClient.Load() {
+							if cli.conn != nil && !cli.conn.IsClosed() {
+								logger.Error(fmt.Sprintf("客户端【%v】超时无数据,断开连接.", cli.ClientId))
+
+								go cli.conn.Close()
+							}
+						} else {
+							logger.Error(fmt.Sprintf("客户端【%v】超时无数据,断开连接.", cli.ClientId))
+							cli.Dispose()
+						}
+					}
+					//如果无发送包,定时发送心跳包
+					if time.Now().Sub(cli.lastTxTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000*0.3) {
+						var heartbeat HeartbeatPacket = ""
+						cli.SendPacket(&heartbeat)
+					}
 				}
-				if time.Now().Sub(cli.lastPktTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000) {
-					logger.Error(fmt.Sprintf("客户端【%v】超时无数据,断开连接.", cli.ClientId))
-					cli.Close()
-				}
+
 			}
 		}
 	}()
@@ -158,42 +189,73 @@ func (m *Client) SetProperty(property string, value interface{}) {
 
 func (m *Client) receiveMessage(rawData []byte) {
 	log.Println("recv:", string(rawData))
-	var needExchangeSecret = false
-	crypto := m.options.Crypto
-	if crypto != nil {
-		switch crypto.state {
-		case 2:
-			crypto.Decode(rawData, rawData)
-		case 1:
-			crypto.Decode(rawData, rawData)
-			crypto.state = 2
-		case 0:
-			needExchangeSecret = true
+	payload, err := INetPacket(nil), error(nil)
+	switch m.state.Load().(clientState) {
+	case CONNECTED:
+		var needExchangeSecret = false
+		crypto := m.options.Crypto
+		if crypto != nil {
+			switch crypto.state {
+			case 2:
+				crypto.Decode(rawData, rawData)
+			case 1:
+				crypto.Decode(rawData, rawData)
+				crypto.state = 2
+			case 0:
+				needExchangeSecret = true
+			}
 		}
-	}
-	payload, err := m.options.PacketCodec.Unmarshal(rawData)
-	if err != nil {
-		logger.Error("net通信包解析出错", zap.Any("rawData", string(rawData)))
-		return
-	}
-	if needExchangeSecret && (payload.TypeCode() != REQUEST_PACKET || payload.(*RequestPacket).Method != "exchange_secret") {
-		logger.Warn("client还未交互密钥,无效通信包", zap.Any("rawData", string(rawData)))
-		return
-	}
-	if m.options.NeedLogin && (payload.TypeCode() != REQUEST_PACKET || payload.(*RequestPacket).Method != "login") {
-		logger.Warn("client还未登录,无效通信包", zap.Any("rawData", string(rawData)))
-		return
+		payload, err = m.options.PacketCodec.Unmarshal(rawData)
+		if err != nil {
+			logger.Error("net通信包解析出错", zap.Any("rawData", string(rawData)))
+			return
+		}
+		if needExchangeSecret && (payload.TypeCode() != REQUEST_PACKET || payload.(*RequestPacket).Method != "exchange_secret") {
+			logger.Warn("client还未交互密钥,无效通信包", zap.Any("rawData", string(rawData)))
+			return
+		}
+		if m.state.Load().(clientState) == CONNECTED && m.options.NeedLogin && (payload.TypeCode() != REQUEST_PACKET || payload.(*RequestPacket).Method != "login") {
+			logger.Warn("client还未登录,无效通信包", zap.Any("rawData", string(rawData)))
+			return
+		}
+	case EXCHANGED_SECRET:
+		if m.options.Crypto != nil {
+			m.options.Crypto.Decode(rawData, rawData)
+		}
+
+	default:
+		payload, err = m.options.PacketCodec.Unmarshal(rawData)
+		if err != nil {
+			logger.Error("net通信包解析出错", zap.Any("rawData", string(rawData)))
+			return
+		}
 	}
 	pkt := &Packet{
 		RawData:       rawData,
 		PacketType:    payload.(INetPacket).TypeCode(),
 		PacketContent: payload.(INetPacket),
-		Client:        nil,
+		Client:        m,
 	}
-	pkt.Client = m
 	atomic.AddInt64(&Enqueue, 1)
-	m.lastPktTime.Store(time.Now())
+	m.lastRxTime.Store(time.Now())
 	m.rxQueue <- pkt
+}
+
+func (m *Client) changeState(to clientState) {
+	switch to {
+	case CONNECTED:
+		if m.options.Crypto == nil {
+			to = EXCHANGED_SECRET
+			if !m.options.NeedLogin {
+				to = LOGINED
+			}
+		}
+	case EXCHANGED_SECRET:
+		if m.options.NeedLogin {
+			to = LOGINED
+		}
+	}
+	m.state.Store(to)
 }
 
 func (m *Client) onReceiveRequest(pkt *Packet) {
@@ -380,7 +442,12 @@ func (m *Client) Request(method string, params []byte) (interface{}, error) {
 	pkt := &RequestPacket{Id: uuid.New().String(), Method: method, Params: params}
 	if value, loaded := m.pendingResp.Load(pkt.Id); loaded {
 		request := value.(*flyPacket)
-		<-request.resultBack
+		select {
+		case <-m.ctx.Done():
+			return nil, errors.New("client已close")
+		case <-request.resultBack:
+			return request.result, request.err
+		}
 		return request.result, request.err
 	}
 	if value, loaded := m.pendingResp.LoadOrStore(pkt.Id, newFlyRequest()); !loaded {
@@ -389,18 +456,24 @@ func (m *Client) Request(method string, params []byte) (interface{}, error) {
 		timeout := time.After(time.Second * time.Duration(m.options.WaitTimeout))
 		for {
 			select {
+			case <-m.ctx.Done():
+				return nil, errors.New("client已close")
 			case <-request.resultBack:
 				return request.result, request.err
 			case <-timeout:
-				request.err = errors.New("超时未接收到RequestAck或者Response回复")
+				request.err = fmt.Errorf("超时未接收到RequestAck或者Response回复,reqId=%v", pkt.GetId())
 				close(request.resultBack)
 				return nil, request.err
 			}
 		}
 	} else {
 		request := value.(*flyPacket)
-		<-request.resultBack
-		return request.result, request.err
+		select {
+		case <-m.ctx.Done():
+			return nil, errors.New("client已close")
+		case <-request.resultBack:
+			return request.result, request.err
+		}
 	}
 }
 
@@ -413,17 +486,23 @@ func (m *Client) RequestWithRetry(method string, params []byte) (interface{}, er
 func (m *Client) RequestWithRetryByPacket(pkt *RequestPacket) (interface{}, error) {
 	if value, loaded := m.pendingResp.Load(pkt.Id); loaded {
 		request := value.(*flyPacket)
-		<-request.resultBack
-		return request.result, request.err
+		select {
+		case <-m.ctx.Done():
+			return nil, errors.New("client已close")
+		case <-request.resultBack:
+			return request.result, request.err
+		}
 	}
 	if value, loaded := m.pendingResp.LoadOrStore(pkt.Id, newFlyRequest()); !loaded {
 		request := value.(*flyPacket)
-		packet := defaultCodec.Marshal(pkt)
+		packet := m.options.PacketCodec.Marshal(pkt)
 		m.SendMessage(packet)
 		beAcked := false
 		timeout := time.After(time.Second * time.Duration(m.options.WaitTimeout))
 		for {
 			select {
+			case <-m.ctx.Done():
+				return nil, errors.New("client已close")
 			case <-request.resultBack:
 				return request.result, request.err
 			case <-request.ackBack:
@@ -433,7 +512,7 @@ func (m *Client) RequestWithRetryByPacket(pkt *RequestPacket) (interface{}, erro
 					m.SendMessage(packet)
 				}
 			case <-timeout:
-				request.err = errors.New("超时未接收到RequestAck或者Response回复")
+				request.err = fmt.Errorf("超时未接收到RequestAck或者Response回复,reqId=%v", pkt.GetId())
 				if _, loaded = m.pendingResp.LoadAndDelete(pkt.Id); loaded {
 					close(request.resultBack)
 				}
@@ -442,8 +521,12 @@ func (m *Client) RequestWithRetryByPacket(pkt *RequestPacket) (interface{}, erro
 		}
 	} else {
 		request := value.(*flyPacket)
-		<-request.resultBack
-		return request.result, request.err
+		select {
+		case <-m.ctx.Done():
+			return nil, errors.New("client已close")
+		case <-request.resultBack:
+			return request.result, request.err
+		}
 	}
 }
 
@@ -456,17 +539,19 @@ func (m *Client) SendPacketWithRetry(pkt INetPacket) error {
 	}
 	if value, loaded := m.pendingAck.LoadOrStore(pkt.GetId(), newFlyNotify()); !loaded {
 		notify := value.(*flyPacket)
-		packet := defaultCodec.Marshal(pkt)
+		packet := m.options.PacketCodec.Marshal(pkt)
 		m.SendMessage(packet)
 		timeout := time.After(time.Second * time.Duration(m.options.WaitTimeout))
 		for {
 			select {
+			case <-m.ctx.Done():
+				return nil
 			case <-notify.ackBack:
 				return notify.err
 			case <-time.After(time.Millisecond * time.Duration(m.options.RetryInterval*1000)):
 				m.SendMessage(packet)
 			case <-timeout:
-				notify.err = errors.New("超时未接收到ResponseAck回复")
+				notify.err = fmt.Errorf("超时未接收到ResponseAck[id=%v]回复", pkt.GetId())
 				if _, loaded = m.pendingAck.LoadAndDelete(pkt.GetId()); loaded {
 					close(notify.ackBack)
 				}
@@ -475,8 +560,12 @@ func (m *Client) SendPacketWithRetry(pkt INetPacket) error {
 		}
 	} else {
 		notify := value.(*flyPacket)
-		<-notify.ackBack
-		return notify.err
+		select {
+		case <-m.ctx.Done():
+			return nil
+		case <-notify.ackBack:
+			return notify.err
+		}
 	}
 }
 
@@ -517,16 +606,17 @@ func (m *Client) StreamRequest(method string, params []byte, execute func(stream
 	}
 	closePkt := &StreamClosePacket{StreamId: stream.Id}
 	if err != nil {
-		logger.Error("stream执行出错", zap.Error(err))
+		logger.Error("stream执行出错", zap.String("streamId", stream.Id), zap.Error(err))
 		closePkt.Error = err.Error()
 	}
 	err = m.SendPacketDirect(closePkt)
 	if err != nil {
-		logger.Error("发送StreamClosePacket出错", zap.Error(err))
+		logger.Error("发送StreamClosePacket出错", zap.String("streamId", stream.Id), zap.Error(err))
 	}
 }
 
 func (m *Client) SendMessage(message []byte) error {
+	m.lastTxTime.Store(time.Now())
 	log.Println("send:", string(message))
 	if m.options.Crypto != nil && m.options.Crypto.state == 2 {
 		m.options.Crypto.Encode(message, message)
@@ -535,6 +625,7 @@ func (m *Client) SendMessage(message []byte) error {
 }
 
 func (m *Client) SendMessageDirect(message []byte) error {
+	m.lastTxTime.Store(time.Now())
 	log.Println("send:", string(message))
 	if m.options.Crypto != nil && m.options.Crypto.state == 2 {
 		m.options.Crypto.Encode(message, message)
@@ -543,11 +634,11 @@ func (m *Client) SendMessageDirect(message []byte) error {
 }
 
 func (m *Client) SendPacket(packet INetPacket) error {
-	return m.SendMessage(defaultCodec.Marshal(packet))
+	return m.SendMessage(m.options.PacketCodec.Marshal(packet))
 }
 
 func (m *Client) SendPacketDirect(packet INetPacket) error {
-	return m.SendMessageDirect(defaultCodec.Marshal(packet))
+	return m.SendMessageDirect(m.options.PacketCodec.Marshal(packet))
 }
 
 // 客户端进行登录
@@ -559,25 +650,22 @@ func (m *Client) Login(params *LoginParams) error {
 	_, err := m.RequestWithRetryByPacket(pkt)
 	if err == nil {
 		log.Println("客户端登录成功", zap.String("clientId", m.ClientId))
+		m.changeState(LOGINED)
 		m.OnLogin.RiseEvent(nil)
 	}
 	return err
 }
 
-func (m *Client) Close() {
-	if m.isClosed.Load() {
+func (m *Client) Dispose() {
+	if m.beDisposed.Load() {
 		return
 	}
-	m.isClosed.Store(true)
+	m.beDisposed.Store(true)
 	m.cancel()
 	m.ClearAllSubTopics()
+	logger.Info("客户端释放", zap.String("clientId", m.ClientId), zap.String("from", m.conn.RemoteAddr().String()))
 	m.conn.Close()
-	logger.Info("客户端断连", zap.String("clientId", m.ClientId))
 	m.OnDispose.RiseEvent(nil)
-}
-
-func (m *Client) IsClosed() bool {
-	return m.isClosed.Load()
 }
 
 type flyPacket struct {

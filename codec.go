@@ -83,6 +83,11 @@ func NewSimpleCodec() *SimpleCodec {
 			err := json.Unmarshal(body, &req)
 			return &req, err
 		},
+		HEARTBEAT_PACKET: func(body []byte) (INetPacket, error) {
+			var req HeartbeatPacket
+			err := json.Unmarshal(body, &req)
+			return &req, err
+		},
 	}
 	return &SimpleCodec{contentDecoder}
 }

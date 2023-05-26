@@ -11,6 +11,8 @@ func DialHubTcp(addr string, params LoginParams) *Client {
 		WaitTimeout:      5,
 		RetryInterval:    3,
 	})
+	client.beClient.Store(true)
+
 	var tryConn func()
 	tryConn = func() {
 		logger.Info("Try进行Tcp连接..", zap.Any("addr", addr))
@@ -22,11 +24,13 @@ func DialHubTcp(addr string, params LoginParams) *Client {
 			return
 		}
 		client.conn = conn
+		client.changeState(CONNECTED)
 		conn.OnMessage.AddEventListener(func(data interface{}) {
 			client.receiveMessage(data.([]byte))
 		})
 		conn.OnDisconnect.AddEventListener(func(data interface{}) {
 			logger.Error("Tcp断连.....")
+			client.changeState(DISCONNECT)
 			client.ClearAllSubTopics()
 			time.Sleep(time.Second * 3)
 			tryConn()
@@ -41,6 +45,7 @@ func DialHubTcp(addr string, params LoginParams) *Client {
 				logger.Error("登录失败", zap.Error(err), zap.Any("login params", params))
 				time.Sleep(time.Second * 3)
 			} else {
+
 				break
 			}
 		}
