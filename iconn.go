@@ -1,5 +1,7 @@
 package nethub
 
+import "net"
+
 type IConn interface {
 	//异步发送,进入发送队列
 	SendMessage(msg []byte) error
@@ -8,5 +10,7 @@ type IConn interface {
 	//关闭
 	Close()
 
+	RemoteAddr() net.Addr
+	
 	ListenToOnMessage(func(data interface{}))
 }

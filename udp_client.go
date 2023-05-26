@@ -129,6 +129,10 @@ func (n *UdpClient) GetAuth() interface{} {
 	return nil
 }
 
+func (n *UdpClient) RemoteAddr() net.Addr {
+	return n.Conn.RemoteAddr()
+}
+
 func (n *UdpClient) ListenToOnDisconnect(f func(data interface{})) {
 	n.OnDisconnect.AddEventListener(f)
 }

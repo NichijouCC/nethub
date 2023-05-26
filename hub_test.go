@@ -13,8 +13,8 @@ func TestHub_ListenAndServe(t *testing.T) {
 		RetryTimeout:     10,
 		RetryInterval:    3,
 	})
-	//hub.ListenAndServeUdp(":1234", 2)
-	//hub.ListenAndServeTcp(":1235", 2)
+	hub.ListenAndServeUdp(":1234", 2)
+	hub.ListenAndServeTcp(":1235", 2)
 	hub.ListenAndServeWebsocket(":1555")
 	select {}
 }
@@ -27,9 +27,9 @@ func TestHub_RegisterRequestHandler(t *testing.T) {
 	})
 	hub.ListenAndServeTcp(":1235", 2)
 	hub.RegisterRequestHandler("add", func(req *RequestPacket, from *Client) (interface{}, error) {
-
 		return 2, nil
 	})
+	select {}
 }
 
 func TestHub_RegisterStreamHandler(t *testing.T) {

@@ -219,7 +219,7 @@ func (n *Hub) FindClient(clientId string) (*Client, bool) {
 func (n *Hub) onClientLogin(new *Client) {
 	if client, ok := n.FindClient(new.ClientId); ok {
 		logger.Error(fmt.Sprintf("clientId【%v】已连接,关闭旧连接", new.ClientId))
-		client.conn.Close()
+		client.Close()
 	}
 	logger.Info("新增加客户端", zap.String("clientId", new.ClientId))
 	n.clients.Store(new.ClientId, new)

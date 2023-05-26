@@ -25,6 +25,10 @@ func (n *fakeUdpConn) Close() {
 
 }
 
+func (n *fakeUdpConn) RemoteAddr() net.Addr {
+	return n.Addr
+}
+
 func (n *fakeUdpConn) ListenToOnMessage(f func(data interface{})) {
 
 }

@@ -44,7 +44,7 @@ func DialHubTcp(addr string, params LoginParams) *Client {
 				break
 			}
 		}
-		client.OnLogin.RiseEvent(nil)
+
 	}
 	go tryConn()
 	return client

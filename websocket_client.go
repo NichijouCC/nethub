@@ -15,9 +15,6 @@ func DialHubWebsocket(addr string, params LoginParams) *Client {
 	if params.BucketId != nil {
 		values.Set("bucket_id", strconv.FormatInt(*params.BucketId, 10))
 	}
-	if params.Token != nil {
-		values.Set("token", *params.Token)
-	}
 	addr = fmt.Sprintf("%v?%v", addr, values.Encode())
 
 	var tryConn func()

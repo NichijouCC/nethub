@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
+	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -73,7 +74,10 @@ var ClientPubChLen = 1000
 
 func newClient(conn IConn, opts *ClientOptions) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
-	se := &Client{
+	if opts.PacketCodec == nil {
+		opts.PacketCodec = defaultCodec
+	}
+	cli := &Client{
 		ctx:           ctx,
 		cancel:        cancel,
 		ClientId:      uuid.NewString(),
@@ -87,28 +91,28 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 		PubSub:        newPubSub(ctx, ClientPubChLen),
 		options:       opts,
 	}
-	se.lastPktTime.Store(time.Now())
+	cli.lastPktTime.Store(time.Now())
 	//包处理
-	se.packetHandler[REQUEST_PACKET] = se.onReceiveRequest
-	se.packetHandler[ACK_PACKET] = se.onReceiveAck
-	se.packetHandler[RESPONSE_PACKET] = se.onReceiveResponse
-	se.packetHandler[PUBLISH_PACKET] = se.onReceivePublish
-	se.packetHandler[SUBSCRIBE_PACKET] = se.onReceiveSubscribe
-	se.packetHandler[UNSUBSCRIBE_PACKET] = se.onReceiveSubscribe
-	se.packetHandler[BROADCAST_PACKET] = se.onReceiveBroadcast
-	se.packetHandler[STREAM_REQUEST_PACKET] = se.onReceiveStreamRequest
-	se.packetHandler[STREAM_RESPONSE_PACKET] = se.onReceiveStreamResponse
-	se.packetHandler[STREAM_CLOSE_PACKET] = se.onReceiveCloseStream
-	se.packetHandler[PING_PACKET] = func(pkt *Packet) {
-		if se.OnPingHandler != nil {
-			se.OnPingHandler(pkt.PacketContent.(*PingPacket))
+	cli.packetHandler[REQUEST_PACKET] = cli.onReceiveRequest
+	cli.packetHandler[ACK_PACKET] = cli.onReceiveAck
+	cli.packetHandler[RESPONSE_PACKET] = cli.onReceiveResponse
+	cli.packetHandler[PUBLISH_PACKET] = cli.onReceivePublish
+	cli.packetHandler[SUBSCRIBE_PACKET] = cli.onReceiveSubscribe
+	cli.packetHandler[UNSUBSCRIBE_PACKET] = cli.onReceiveSubscribe
+	cli.packetHandler[BROADCAST_PACKET] = cli.onReceiveBroadcast
+	cli.packetHandler[STREAM_REQUEST_PACKET] = cli.onReceiveStreamRequest
+	cli.packetHandler[STREAM_RESPONSE_PACKET] = cli.onReceiveStreamResponse
+	cli.packetHandler[STREAM_CLOSE_PACKET] = cli.onReceiveCloseStream
+	cli.packetHandler[PING_PACKET] = func(pkt *Packet) {
+		if cli.OnPingHandler != nil {
+			cli.OnPingHandler(pkt.PacketContent.(*PingPacket))
 		}
 		var content = PongPacket(*pkt.PacketContent.(*PingPacket))
-		se.SendPacket(&content)
+		cli.SendPacket(&content)
 	}
-	se.packetHandler[PONG_PACKET] = func(pkt *Packet) {
-		if se.OnPongHandler != nil {
-			se.OnPongHandler(pkt.PacketContent.(*PongPacket))
+	cli.packetHandler[PONG_PACKET] = func(pkt *Packet) {
+		if cli.OnPongHandler != nil {
+			cli.OnPongHandler(pkt.PacketContent.(*PongPacket))
 		}
 	}
 
@@ -116,30 +120,32 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 		ticker := time.NewTicker(time.Second)
 		for {
 			select {
-			case pkt := <-se.rxQueue:
+			case <-cli.ctx.Done():
+				return
+			case pkt := <-cli.rxQueue:
 				atomic.AddInt64(&Enqueue, -1)
 				atomic.AddInt64(&EnConsume, 1)
-				handler, ok := se.packetHandler[pkt.PacketType]
+				handler, ok := cli.packetHandler[pkt.PacketType]
 				if !ok {
 					logger.Error("rpc通信包找不到handler", zap.Any("packet", string(pkt.RawData)))
 					return
 				}
 				handler(pkt)
 			case <-ticker.C:
-				if time.Now().Sub(se.lastPktTime.Load().(time.Time)) > time.Millisecond*time.Duration(se.options.HeartbeatTimeout*1000*0.3) {
+				if time.Now().Sub(cli.lastPktTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000*0.3) {
 					//logger.Warn(fmt.Sprintf("客户端【%v】无数据,发送PING.", m.ClientId))
 					var ping PingPacket = "PING"
-					se.SendPacket(&ping)
+					cli.SendPacket(&ping)
 				}
-				if time.Now().Sub(se.lastPktTime.Load().(time.Time)) > time.Millisecond*time.Duration(se.options.HeartbeatTimeout*1000) {
-					logger.Error(fmt.Sprintf("客户端【%v】超时无数据,断开连接.", se.ClientId))
-					se.Close()
+				if time.Now().Sub(cli.lastPktTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000) {
+					logger.Error(fmt.Sprintf("客户端【%v】超时无数据,断开连接.", cli.ClientId))
+					cli.Close()
 				}
 			}
 		}
 	}()
 
-	return se
+	return cli
 }
 
 func (m *Client) GetProperty(property string) (interface{}, bool) {
@@ -151,6 +157,7 @@ func (m *Client) SetProperty(property string, value interface{}) {
 }
 
 func (m *Client) receiveMessage(rawData []byte) {
+	log.Println("recv:", string(rawData))
 	var needExchangeSecret = false
 	crypto := m.options.Crypto
 	if crypto != nil {
@@ -214,7 +221,7 @@ func (m *Client) onReceiveRequest(pkt *Packet) {
 				}
 				err := m.SendPacketWithRetry(resp)
 				if err != nil {
-					logger.Error("发送response出错", zap.Error(err))
+					logger.Error("发送response出错", zap.String("clientId", m.ClientId), zap.String("From", m.conn.RemoteAddr().String()), zap.Error(err))
 				}
 			}()
 		}
@@ -520,6 +527,7 @@ func (m *Client) StreamRequest(method string, params []byte, execute func(stream
 }
 
 func (m *Client) SendMessage(message []byte) error {
+	log.Println("send:", string(message))
 	if m.options.Crypto != nil && m.options.Crypto.state == 2 {
 		m.options.Crypto.Encode(message, message)
 	}
@@ -527,6 +535,7 @@ func (m *Client) SendMessage(message []byte) error {
 }
 
 func (m *Client) SendMessageDirect(message []byte) error {
+	log.Println("send:", string(message))
 	if m.options.Crypto != nil && m.options.Crypto.state == 2 {
 		m.options.Crypto.Encode(message, message)
 	}
@@ -543,12 +552,14 @@ func (m *Client) SendPacketDirect(packet INetPacket) error {
 
 // 客户端进行登录
 func (m *Client) Login(params *LoginParams) error {
+	m.ClientId = params.ClientId
+	m.GroupId = params.BucketId
 	data, _ := json.Marshal(params)
 	pkt := &RequestPacket{Id: uuid.New().String(), Method: "login", Params: data}
 	_, err := m.RequestWithRetryByPacket(pkt)
 	if err == nil {
-		m.ClientId = params.ClientId
-		m.GroupId = params.BucketId
+		log.Println("客户端登录成功", zap.String("clientId", m.ClientId))
+		m.OnLogin.RiseEvent(nil)
 	}
 	return err
 }
@@ -558,10 +569,11 @@ func (m *Client) Close() {
 		return
 	}
 	m.isClosed.Store(true)
-	logger.Info("客户端断连", zap.String("clientId", m.ClientId))
-	m.OnDispose.RiseEvent(nil)
+	m.cancel()
 	m.ClearAllSubTopics()
 	m.conn.Close()
+	logger.Info("客户端断连", zap.String("clientId", m.ClientId))
+	m.OnDispose.RiseEvent(nil)
 }
 
 func (m *Client) IsClosed() bool {
