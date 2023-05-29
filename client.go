@@ -41,6 +41,8 @@ var (
 	DISPOSED         clientState = "DISPOSED"
 )
 
+var EXCHANGE_SECRET = "exchange_secret"
+
 type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -151,8 +153,8 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 				}
 				handler(pkt)
 			case <-ticker.C:
-				switch cli.state.Load().(clientState) {
-				case CONNECTED, EXCHANGED_SECRET, LOGINED:
+				state := cli.state.Load().(clientState)
+				if state == CONNECTED || state == EXCHANGED_SECRET || state == LOGINED {
 					if time.Now().Sub(cli.lastRxTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000) {
 						if cli.beClient.Load() {
 							if cli.conn != nil && !cli.conn.IsClosed() {
@@ -165,13 +167,18 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 							cli.Dispose()
 						}
 					}
+				}
+				if state == LOGINED {
 					//如果无发送包,定时发送心跳包
-					if time.Now().Sub(cli.lastTxTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000*0.3) {
+					if cli.lastTxTime.Load() == nil || time.Now().Sub(cli.lastTxTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000*0.3) {
+						if cli.lastTxTime.Load() != nil {
+							log.Println("心跳包发送时间:", time.Now().Sub(cli.lastTxTime.Load().(time.Time)).Milliseconds(), cli.ClientId)
+						}
 						var heartbeat HeartbeatPacket = ""
 						cli.SendPacket(&heartbeat)
+
 					}
 				}
-
 			}
 		}
 	}()
@@ -188,41 +195,35 @@ func (m *Client) SetProperty(property string, value interface{}) {
 }
 
 func (m *Client) receiveMessage(rawData []byte) {
-	log.Println("recv:", string(rawData))
+	log.Println("recv:", zap.String("uuid", m.ClientId), string(rawData))
 	payload, err := INetPacket(nil), error(nil)
 	switch m.state.Load().(clientState) {
 	case CONNECTED:
-		var needExchangeSecret = false
-		crypto := m.options.Crypto
-		if crypto != nil {
-			switch crypto.state {
-			case 2:
-				crypto.Decode(rawData, rawData)
-			case 1:
-				crypto.Decode(rawData, rawData)
-				crypto.state = 2
-			case 0:
-				needExchangeSecret = true
-			}
-		}
 		payload, err = m.options.PacketCodec.Unmarshal(rawData)
 		if err != nil {
 			logger.Error("net通信包解析出错", zap.Any("rawData", string(rawData)))
 			return
 		}
-		if needExchangeSecret && (payload.TypeCode() != REQUEST_PACKET || payload.(*RequestPacket).Method != "exchange_secret") {
+		switch payload.TypeCode() {
+		case REQUEST_PACKET:
+			if payload.(*RequestPacket).Method != EXCHANGE_SECRET {
+				logger.Warn("client还未交互密钥,无效通信包", zap.Any("rawData", string(rawData)))
+				return
+			}
+		case ACK_PACKET, RESPONSE_PACKET:
+		default:
 			logger.Warn("client还未交互密钥,无效通信包", zap.Any("rawData", string(rawData)))
-			return
-		}
-		if m.state.Load().(clientState) == CONNECTED && m.options.NeedLogin && (payload.TypeCode() != REQUEST_PACKET || payload.(*RequestPacket).Method != "login") {
-			logger.Warn("client还未登录,无效通信包", zap.Any("rawData", string(rawData)))
 			return
 		}
 	case EXCHANGED_SECRET:
 		if m.options.Crypto != nil {
 			m.options.Crypto.Decode(rawData, rawData)
 		}
-
+		payload, err = m.options.PacketCodec.Unmarshal(rawData)
+		if err != nil {
+			logger.Error("net通信包解析出错", zap.Any("rawData", string(rawData)))
+			return
+		}
 	default:
 		payload, err = m.options.PacketCodec.Unmarshal(rawData)
 		if err != nil {
@@ -251,9 +252,10 @@ func (m *Client) changeState(to clientState) {
 			}
 		}
 	case EXCHANGED_SECRET:
-		if m.options.NeedLogin {
+		if !m.options.NeedLogin {
 			to = LOGINED
 		}
+		logger.Info("交换密钥成功！")
 	}
 	m.state.Store(to)
 }
@@ -284,6 +286,8 @@ func (m *Client) onReceiveRequest(pkt *Packet) {
 				err := m.SendPacketWithRetry(resp)
 				if err != nil {
 					logger.Error("发送response出错", zap.String("clientId", m.ClientId), zap.String("From", m.conn.RemoteAddr().String()), zap.Error(err))
+				} else if request.Method == EXCHANGE_SECRET && resp.Error == "" {
+					m.changeState(EXCHANGED_SECRET)
 				}
 			}()
 		}
@@ -617,8 +621,8 @@ func (m *Client) StreamRequest(method string, params []byte, execute func(stream
 
 func (m *Client) SendMessage(message []byte) error {
 	m.lastTxTime.Store(time.Now())
-	log.Println("send:", string(message))
-	if m.options.Crypto != nil && m.options.Crypto.state == 2 {
+	log.Println("send:", m.ClientId, string(message))
+	if m.options.Crypto != nil && (m.state.Load() == EXCHANGED_SECRET || m.state.Load() == LOGINED) {
 		m.options.Crypto.Encode(message, message)
 	}
 	return m.conn.SendMessage(message)
@@ -626,8 +630,8 @@ func (m *Client) SendMessage(message []byte) error {
 
 func (m *Client) SendMessageDirect(message []byte) error {
 	m.lastTxTime.Store(time.Now())
-	log.Println("send:", string(message))
-	if m.options.Crypto != nil && m.options.Crypto.state == 2 {
+	log.Println("send:", m.ClientId, string(message))
+	if m.options.Crypto != nil && (m.state.Load() == EXCHANGED_SECRET || m.state.Load() == LOGINED) {
 		m.options.Crypto.Encode(message, message)
 	}
 	return m.conn.SendMessageDirect(message)
@@ -643,6 +647,18 @@ func (m *Client) SendPacketDirect(packet INetPacket) error {
 
 // 客户端进行登录
 func (m *Client) Login(params *LoginParams) error {
+	if m.options.Crypto != nil {
+		secretParams, _ := json.Marshal(&ExchangeSecretParams{PubKey: m.options.Crypto.pubKey.Bytes()})
+		resp, err := m.Request(EXCHANGE_SECRET, secretParams)
+		if err != nil {
+			return err
+		}
+		_, err = m.options.Crypto.ComputeSecret([]byte(resp.(string)))
+		if err != nil {
+			return err
+		}
+		m.changeState(EXCHANGED_SECRET)
+	}
 	m.ClientId = params.ClientId
 	m.GroupId = params.BucketId
 	data, _ := json.Marshal(params)

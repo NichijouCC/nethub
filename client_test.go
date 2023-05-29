@@ -9,7 +9,12 @@ import (
 )
 
 func TestClient_Request(t *testing.T) {
-	conn := DialHubTcp("127.0.0.1:1235", LoginParams{ClientId: uuid.New().String()})
+	conn := DialHubTcp("127.0.0.1:1235", LoginParams{ClientId: uuid.New().String()}, &ClientOptions{
+		HeartbeatTimeout: 5,
+		WaitTimeout:      5,
+		RetryInterval:    3,
+		Crypto:           NewCrypto(),
+	})
 	conn.OnLogin.AddEventListener(func(data interface{}) {
 		//远程调用
 		param, _ := json.Marshal(map[string]interface{}{"a": 1, "b": 2})
@@ -19,7 +24,12 @@ func TestClient_Request(t *testing.T) {
 }
 
 func TestClient_RequestWithRetry(t *testing.T) {
-	conn := DialHubTcp("127.0.0.1:1235", LoginParams{ClientId: uuid.New().String()})
+	conn := DialHubTcp("127.0.0.1:1235", LoginParams{ClientId: uuid.New().String()}, &ClientOptions{
+		HeartbeatTimeout: 5,
+		WaitTimeout:      5,
+		RetryInterval:    3,
+		Crypto:           NewCrypto(),
+	})
 	conn.OnLogin.AddEventListener(func(data interface{}) {
 		//远程调用
 		param, _ := json.Marshal(map[string]interface{}{"a": 1, "b": 2})
@@ -30,7 +40,12 @@ func TestClient_RequestWithRetry(t *testing.T) {
 
 func TestClient_SubscribeAttributes(t *testing.T) {
 	var projectId int64 = 53010217439105
-	client := DialHubTcp("127.0.0.1:1235", LoginParams{ClientId: uuid.New().String(), BucketId: &projectId})
+	client := DialHubTcp("127.0.0.1:1235", LoginParams{ClientId: uuid.New().String(), BucketId: &projectId}, &ClientOptions{
+		HeartbeatTimeout: 5,
+		WaitTimeout:      5,
+		RetryInterval:    3,
+		Crypto:           NewCrypto(),
+	})
 	client.OnLogin.AddEventListener(func(data interface{}) {
 		var gpsAtts = []string{"longitude", "latitude", "altitude", "yaw"}
 		client.SubscribeAttributes("+/rt_message", gpsAtts, func(data *PublishPacket, from *Client) {
@@ -42,7 +57,12 @@ func TestClient_SubscribeAttributes(t *testing.T) {
 
 func TestClient_Subscribe(t *testing.T) {
 	var projectId int64 = 53010217439105
-	client := DialHubTcp("127.0.0.1:1235", LoginParams{ClientId: uuid.New().String(), BucketId: &projectId})
+	client := DialHubTcp("127.0.0.1:1235", LoginParams{ClientId: uuid.New().String(), BucketId: &projectId}, &ClientOptions{
+		HeartbeatTimeout: 5,
+		WaitTimeout:      5,
+		RetryInterval:    3,
+		Crypto:           NewCrypto(),
+	})
 	client.OnLogin.AddEventListener(func(data interface{}) {
 		client.Subscribe("+/rt_message", func(data *PublishPacket, from *Client) {
 			log.Println(data.ClientId, string(data.Params))
@@ -64,7 +84,12 @@ func TestClient_wesocket_Subscribe(t *testing.T) {
 
 func TestClient_Publish(t *testing.T) {
 	var projectId int64 = 53010217439105
-	client := DialHubTcp("127.0.0.1:1235", LoginParams{ClientId: uuid.New().String(), BucketId: &projectId})
+	client := DialHubTcp("127.0.0.1:1235", LoginParams{ClientId: uuid.New().String(), BucketId: &projectId}, &ClientOptions{
+		HeartbeatTimeout: 5,
+		WaitTimeout:      5,
+		RetryInterval:    3,
+		Crypto:           NewCrypto(),
+	})
 	client.OnLogin.AddEventListener(func(data interface{}) {
 		//模拟实时上报消息
 		ticker := time.NewTicker(time.Second)
@@ -77,7 +102,12 @@ func TestClient_Publish(t *testing.T) {
 
 func TestClient_StreamRequest(t *testing.T) {
 	var projectId int64 = 53010217439105
-	conn := DialHubTcp("127.0.0.1:1235", LoginParams{ClientId: uuid.New().String(), BucketId: &projectId})
+	conn := DialHubTcp("127.0.0.1:1235", LoginParams{ClientId: uuid.New().String(), BucketId: &projectId}, &ClientOptions{
+		HeartbeatTimeout: 5,
+		WaitTimeout:      5,
+		RetryInterval:    3,
+		Crypto:           NewCrypto(),
+	})
 	conn.OnLogin.AddEventListener(func(data interface{}) {
 		//初始化流
 		conn.StreamRequest("add", nil, func(stream *Stream) error {
@@ -119,7 +149,12 @@ func TestClient_StreamRequest(t *testing.T) {
 
 func TestClientPing(t *testing.T) {
 	var projectId int64 = 53010217439105
-	client := DialHubTcp("127.0.0.1:1236", LoginParams{ClientId: uuid.New().String(), BucketId: &projectId})
+	client := DialHubTcp("127.0.0.1:1235", LoginParams{ClientId: uuid.New().String(), BucketId: &projectId}, &ClientOptions{
+		HeartbeatTimeout: 5,
+		WaitTimeout:      5,
+		RetryInterval:    3,
+		Crypto:           NewCrypto(),
+	})
 	client.OnLogin.AddEventListener(func(data interface{}) {
 		client.OnPongHandler = func(pkt *PongPacket) {
 			log.Println(*pkt)

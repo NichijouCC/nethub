@@ -6,6 +6,7 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/gorilla/websocket v1.5.0
 	github.com/libp2p/go-reuseport v0.2.0
+	github.com/pkg/errors v0.8.1
 	go.uber.org/zap v1.24.0
 )
 

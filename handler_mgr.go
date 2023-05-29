@@ -1,6 +1,8 @@
 package nethub
 
-import "sync"
+import (
+	"sync"
+)
 
 type handlerMgr struct {
 	//map[string]requestHandler

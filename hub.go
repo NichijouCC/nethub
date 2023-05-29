@@ -48,7 +48,7 @@ func New(options *HubOptions) *Hub {
 		return "成功", nil
 	})
 
-	r.RegisterRequestHandler("exchange_secret", func(req *RequestPacket, client *Client) (interface{}, error) {
+	r.RegisterRequestHandler(EXCHANGE_SECRET, func(req *RequestPacket, client *Client) (interface{}, error) {
 		var params ExchangeSecretParams
 		err := json.Unmarshal(req.Params, &params)
 		if err != nil {
@@ -61,12 +61,7 @@ func New(options *HubOptions) *Hub {
 		if err != nil {
 			return nil, fmt.Errorf("交换密钥失败,secret出错:%v", err.Error())
 		}
-		reqParams, _ := json.Marshal(&ExchangeSecretParams{PubKey: pubkey})
-		_, err = client.RequestWithRetryByPacket(&RequestPacket{Id: req.Id, Method: "exchange_secret", Params: reqParams})
-		if err == nil {
-			client.changeState(EXCHANGED_SECRET)
-		}
-		return pubkey, nil
+		return string(pubkey), nil
 	})
 
 	return r
@@ -152,6 +147,7 @@ func (n *Hub) ListenAndServeTcp(addr string, listenerCount int, opts ...HubServe
 		})
 		conn.ListenToOnDisconnect(func(i interface{}) {
 			client.ClearAllSubTopics()
+			client.changeState(DISCONNECT)
 		})
 	}
 	go tcp.ListenAndServe(listenerCount)
@@ -176,7 +172,7 @@ func (n *Hub) ListenAndServeWebsocket(addr string, opts ...HubServerOption) *Web
 			PacketCodec:      options.Codec,
 			Crypto:           options.Crypto,
 		})
-		client.state.Store(CONNECTED)
+		client.changeState(CONNECTED)
 		client.handlerMgr = n.handlerMgr
 
 		conn.ListenToOnMessage(func(data interface{}) {
@@ -184,6 +180,7 @@ func (n *Hub) ListenAndServeWebsocket(addr string, opts ...HubServerOption) *Web
 		})
 		conn.ListenToOnDisconnect(func(i interface{}) {
 			client.ClearAllSubTopics()
+			client.changeState(DISCONNECT)
 		})
 	}
 	go ws.ListenAndServe()
