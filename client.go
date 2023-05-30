@@ -154,20 +154,6 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 				handler(pkt)
 			case <-ticker.C:
 				state := cli.state.Load().(clientState)
-				if state == CONNECTED || state == EXCHANGED_SECRET || state == LOGINED {
-					if time.Now().Sub(cli.lastRxTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000) {
-						if cli.beClient.Load() {
-							if cli.conn != nil && !cli.conn.IsClosed() {
-								logger.Error(fmt.Sprintf("客户端【%v】超时无数据,断开连接.", cli.ClientId))
-
-								go cli.conn.Close()
-							}
-						} else {
-							logger.Error(fmt.Sprintf("客户端【%v】超时无数据,断开连接.", cli.ClientId))
-							cli.Dispose()
-						}
-					}
-				}
 				if state == LOGINED {
 					//如果无发送包,定时发送心跳包
 					if cli.lastTxTime.Load() == nil || time.Now().Sub(cli.lastTxTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000*0.3) {
@@ -177,6 +163,19 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 						var heartbeat HeartbeatPacket = ""
 						cli.SendPacket(&heartbeat)
 
+					}
+				}
+
+				if time.Now().Sub(cli.lastRxTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000) {
+					if cli.beClient.Load() {
+						if cli.conn != nil && !cli.conn.IsClosed() {
+							logger.Error(fmt.Sprintf("客户端【%v】超时无数据,断开连接.", cli.ClientId))
+
+							go cli.conn.Close()
+						}
+					} else {
+						logger.Error(fmt.Sprintf("客户端【%v】超时无数据,断开连接.", cli.ClientId))
+						cli.Dispose()
 					}
 				}
 			}
@@ -195,33 +194,36 @@ func (m *Client) SetProperty(property string, value interface{}) {
 }
 
 func (m *Client) receiveMessage(rawData []byte) {
-	log.Println("recv:", zap.String("uuid", m.ClientId), string(rawData))
+
+	var rawStr = string(rawData)
 	payload, err := INetPacket(nil), error(nil)
 	switch m.state.Load().(clientState) {
 	case CONNECTED:
+		logger.Info(fmt.Sprintf("[%v]Recv:%v", m.ClientId, string(rawData)))
 		payload, err = m.options.PacketCodec.Unmarshal(rawData)
 		if err != nil {
-			logger.Error("net通信包解析出错", zap.Any("rawData", string(rawData)))
+			logger.Error("net通信包解析出错", zap.Any("rawData", rawStr))
 			return
 		}
 		switch payload.TypeCode() {
 		case REQUEST_PACKET:
 			if payload.(*RequestPacket).Method != EXCHANGE_SECRET {
-				logger.Warn("client还未交互密钥,无效通信包", zap.Any("rawData", string(rawData)))
+				logger.Warn("client还未交互密钥,无效通信包", zap.Any("rawData", rawStr))
 				return
 			}
 		case ACK_PACKET, RESPONSE_PACKET:
 		default:
-			logger.Warn("client还未交互密钥,无效通信包", zap.Any("rawData", string(rawData)))
+			logger.Warn("client还未交互密钥,无效通信包", zap.Any("rawData", rawStr))
 			return
 		}
-	case EXCHANGED_SECRET:
+	case EXCHANGED_SECRET, LOGINED:
 		if m.options.Crypto != nil {
 			m.options.Crypto.Decode(rawData, rawData)
 		}
+		logger.Info(fmt.Sprintf("[%v]Recv:%v", m.ClientId, string(rawData)))
 		payload, err = m.options.PacketCodec.Unmarshal(rawData)
 		if err != nil {
-			logger.Error("net通信包解析出错", zap.Any("rawData", string(rawData)))
+			logger.Error("net通信包解析出错", zap.Any("rawData", rawStr), zap.Any("decode", string(rawData)))
 			return
 		}
 	default:
@@ -255,7 +257,7 @@ func (m *Client) changeState(to clientState) {
 		if !m.options.NeedLogin {
 			to = LOGINED
 		}
-		logger.Info("交换密钥成功！")
+		logger.Info(fmt.Sprintf("[%v]交换密钥成功!", m.ClientId))
 	}
 	m.state.Store(to)
 }
@@ -286,7 +288,8 @@ func (m *Client) onReceiveRequest(pkt *Packet) {
 				err := m.SendPacketWithRetry(resp)
 				if err != nil {
 					logger.Error("发送response出错", zap.String("clientId", m.ClientId), zap.String("From", m.conn.RemoteAddr().String()), zap.Error(err))
-				} else if request.Method == EXCHANGE_SECRET && resp.Error == "" {
+				}
+				if request.Method == EXCHANGE_SECRET && resp.Error == "" && err == nil {
 					m.changeState(EXCHANGED_SECRET)
 				}
 			}()
@@ -621,7 +624,7 @@ func (m *Client) StreamRequest(method string, params []byte, execute func(stream
 
 func (m *Client) SendMessage(message []byte) error {
 	m.lastTxTime.Store(time.Now())
-	log.Println("send:", m.ClientId, string(message))
+	logger.Info(fmt.Sprintf("[%v]Send:%v", m.ClientId, string(message)))
 	if m.options.Crypto != nil && (m.state.Load() == EXCHANGED_SECRET || m.state.Load() == LOGINED) {
 		m.options.Crypto.Encode(message, message)
 	}
@@ -630,7 +633,7 @@ func (m *Client) SendMessage(message []byte) error {
 
 func (m *Client) SendMessageDirect(message []byte) error {
 	m.lastTxTime.Store(time.Now())
-	log.Println("send:", m.ClientId, string(message))
+	logger.Info(fmt.Sprintf("[%v]Send:%v", m.ClientId, string(message)))
 	if m.options.Crypto != nil && (m.state.Load() == EXCHANGED_SECRET || m.state.Load() == LOGINED) {
 		m.options.Crypto.Encode(message, message)
 	}
@@ -648,12 +651,12 @@ func (m *Client) SendPacketDirect(packet INetPacket) error {
 // 客户端进行登录
 func (m *Client) Login(params *LoginParams) error {
 	if m.options.Crypto != nil {
-		secretParams, _ := json.Marshal(&ExchangeSecretParams{PubKey: m.options.Crypto.pubKey.Bytes()})
+		secretParams, _ := json.Marshal(&ExchangeSecretParams{PubKey: m.options.Crypto.Base64PubKey()})
 		resp, err := m.Request(EXCHANGE_SECRET, secretParams)
 		if err != nil {
 			return err
 		}
-		_, err = m.options.Crypto.ComputeSecret([]byte(resp.(string)))
+		_, err = m.options.Crypto.ComputeSecret(resp.(string))
 		if err != nil {
 			return err
 		}
@@ -714,7 +717,7 @@ type LoginParams struct {
 }
 
 type ExchangeSecretParams struct {
-	PubKey []byte `json:"pub_key"`
+	PubKey string `json:"pub_key"`
 }
 
 type streamHandler func(first *Packet, stream *Stream) error

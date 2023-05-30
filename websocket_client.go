@@ -1,22 +1,13 @@
 package nethub
 
 import (
-	"fmt"
 	"go.uber.org/zap"
-	"net/url"
-	"strconv"
 	"time"
 )
 
 func DialHubWebsocket(addr string, params LoginParams) *Client {
 	var client = newClient(nil, &ClientOptions{HeartbeatTimeout: 5, WaitTimeout: 5, RetryInterval: 3})
 	client.beClient.Store(true)
-	values := url.Values{}
-	values.Set("client_id", params.ClientId)
-	if params.BucketId != nil {
-		values.Set("bucket_id", strconv.FormatInt(*params.BucketId, 10))
-	}
-	addr = fmt.Sprintf("%v?%v", addr, values.Encode())
 
 	var tryConn func()
 	tryConn = func() {
@@ -25,7 +16,7 @@ func DialHubWebsocket(addr string, params LoginParams) *Client {
 		if err != nil {
 			logger.Info("websocket连接失败", zap.Error(err))
 			time.Sleep(time.Second * 3)
-			tryConn()
+			go tryConn()
 			return
 		}
 		client.conn = ws
@@ -38,10 +29,18 @@ func DialHubWebsocket(addr string, params LoginParams) *Client {
 			logger.Error("websocket断连.....")
 			client.ClearAllSubTopics()
 			time.Sleep(time.Second * 3)
-			tryConn()
+			go tryConn()
 		})
 		ws.StartReadWrite()
-		client.OnLogin.RiseEvent(nil)
+		for {
+			err = client.Login(&params)
+			if err != nil {
+				logger.Error("登录失败", zap.Error(err), zap.Any("login params", params))
+				time.Sleep(time.Second * 3)
+			} else {
+				break
+			}
+		}
 	}
 	go tryConn()
 	return client

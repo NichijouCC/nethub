@@ -61,7 +61,7 @@ func New(options *HubOptions) *Hub {
 		if err != nil {
 			return nil, fmt.Errorf("交换密钥失败,secret出错:%v", err.Error())
 		}
-		return string(pubkey), nil
+		return pubkey, nil
 	})
 
 	return r

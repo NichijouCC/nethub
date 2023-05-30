@@ -16,7 +16,7 @@ func DialHubTcp(addr string, params LoginParams, opts *ClientOptions) *Client {
 		if err != nil {
 			logger.Info("Tcp连接失败", zap.Error(err))
 			time.Sleep(time.Second * 3)
-			tryConn()
+			go tryConn()
 			return
 		}
 		client.conn = conn
@@ -29,7 +29,7 @@ func DialHubTcp(addr string, params LoginParams, opts *ClientOptions) *Client {
 			client.changeState(DISCONNECT)
 			client.ClearAllSubTopics()
 			time.Sleep(time.Second * 3)
-			tryConn()
+			go tryConn()
 		})
 		conn.StartReadWrite()
 		for {
@@ -41,7 +41,6 @@ func DialHubTcp(addr string, params LoginParams, opts *ClientOptions) *Client {
 				logger.Error("登录失败", zap.Error(err), zap.Any("login params", params))
 				time.Sleep(time.Second * 3)
 			} else {
-
 				break
 			}
 		}

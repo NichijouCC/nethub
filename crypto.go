@@ -2,12 +2,10 @@ package nethub
 
 import (
 	"crypto/ecdh"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rc4"
-	"crypto/sha256"
-	"github.com/pkg/errors"
+	"encoding/base64"
+	"fmt"
 )
 
 // ecdh+rc4
@@ -16,44 +14,43 @@ type Crypto struct {
 	pubKey  *ecdh.PublicKey
 	encoder *rc4.Cipher
 	decoder *rc4.Cipher
-	//0还未交换secret 1已交换secret 2使用secret
-	state int
-
-	priv *ecdsa.PrivateKey
 }
 
 func NewCrypto() *Crypto {
 	priKey, _ := ecdh.P256().GenerateKey(rand.Reader)
 	pubKey := priKey.PublicKey()
-
-	p, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		panic(errors.Wrap(err, "Could not generate private key"))
-	}
-	return &Crypto{priKey: priKey, pubKey: pubKey, priv: p}
+	return &Crypto{priKey: priKey, pubKey: pubKey}
 }
 
 // 与不安全的远程协商通信secret，返回pubkey
-func (c *Crypto) ComputeSecret(remotePubKey []byte) ([]byte, error) {
-	x, y := elliptic.Unmarshal(elliptic.P256(), remotePubKey)
-	pub := c.priv.PublicKey
-	data := elliptic.Marshal(pub, pub.X, pub.Y)
-
-	seBytes, _ := pub.Curve.ScalarMult(x, y, c.priv.D.Bytes())
-	secret := sha256.Sum256(seBytes.Bytes())
-
-	//rpubkey, err := ecdh.P256().NewPublicKey(remotePubKey)
-	//if err != nil {
-	//	return nil, fmt.Errorf("ecdh compute secrete err:%v", err.Error())
-	//}
-	//secret, err := c.priKey.ECDH(rpubkey)
-	//if err != nil {
-	//	return nil, fmt.Errorf("ecdh compute secrete err:%v", err.Error())
-	//}
+func (c *Crypto) ComputeSecret(remotePubBase64 string) (string, error) {
+	remotePubKey, err := base64.StdEncoding.DecodeString(remotePubBase64)
+	if err != nil {
+		return "", err
+	}
+	rpubkey, err := ecdh.P256().NewPublicKey(remotePubKey)
+	if err != nil {
+		return "", fmt.Errorf("ecdh compute secrete err:%v", err.Error())
+	}
+	secret, err := c.priKey.ECDH(rpubkey)
+	if err != nil {
+		return "", fmt.Errorf("ecdh compute secrete err:%v", err.Error())
+	}
 	c.encoder, _ = rc4.NewCipher(secret[:])
 	c.decoder, _ = rc4.NewCipher(secret[:])
 
-	return data, nil
+	pubBytes := c.pubKey.Bytes()
+	pubBase64 := base64.StdEncoding.EncodeToString(pubBytes)
+
+	logger.Info(fmt.Sprintf("remote pubkey:%v", remotePubBase64))
+	logger.Info(fmt.Sprintf("pubkey:%v", pubBase64))
+	return pubBase64, nil
+}
+
+func (c *Crypto) Base64PubKey() string {
+	pubBytes := c.pubKey.Bytes()
+	pubBase64 := base64.StdEncoding.EncodeToString(pubBytes)
+	return pubBase64
 }
 
 // 加密
