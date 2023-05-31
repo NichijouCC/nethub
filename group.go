@@ -8,26 +8,26 @@ import (
 )
 
 type Group struct {
-	ctx      context.Context
-	cancel   context.CancelFunc
-	parent   *Group
-	bucketId int64
+	ctx    context.Context
+	cancel context.CancelFunc
+	parent *Group
+	id     int64
 	//ClientId->*Client
 	clients sync.Map
 	*PubSub
 }
 
 // group发布队列大小
-var GroupPubChLen = 1000
+var GroupPubChLen = 100
 
 func newGroup(id int64, parent *Group) *Group {
 	ctx, cancel := context.WithCancel(context.Background())
 	bucket := &Group{
-		ctx:      ctx,
-		cancel:   cancel,
-		bucketId: id,
-		parent:   parent,
-		PubSub:   newPubSub(ctx, GroupPubChLen),
+		ctx:    ctx,
+		cancel: cancel,
+		id:     id,
+		parent: parent,
+		PubSub: newPubSub(ctx, GroupPubChLen),
 	}
 	return bucket
 }
@@ -43,7 +43,7 @@ func (m *Group) PubTopic(pkt *PublishPacket, from *Client) {
 	if m.parent != nil {
 		m.parent.PubTopic(&PublishPacket{
 			Id:       pkt.Id,
-			Topic:    fmt.Sprintf("%v/%v", m.bucketId, pkt.Topic),
+			Topic:    fmt.Sprintf("%v/%v", m.id, pkt.Topic),
 			Params:   pkt.Params,
 			ClientId: pkt.ClientId,
 		}, from)
@@ -64,12 +64,12 @@ func (m *Group) FindClient(id string) (*Client, bool) {
 }
 
 func (m *Group) AddClient(client *Client) {
-	logger.Info("新增加客户端", zap.String("clientId", client.ClientId))
+	logger.Info(fmt.Sprintf("GROUP[%v]新增加客户端", m.id), zap.String("clientId", client.ClientId))
 	m.clients.Store(client.ClientId, client)
 	client.Group = m
-	m.PubTopic(&PublishPacket{Topic: "connect"}, client)
-	client.OnDispose.AddEventListener(func(data interface{}) {
-		m.clients.Delete(client.ClientId)
-		m.PubTopic(&PublishPacket{Topic: "disconnect"}, client)
-	})
+}
+
+func (m *Group) RemoveClient(clientId string) {
+	logger.Info(fmt.Sprintf("GROUP[%v]移除客户端", m.id), zap.String("clientId", clientId))
+	m.clients.Delete(clientId)
 }

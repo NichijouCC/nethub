@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go.uber.org/zap"
 	"net"
 	"sync"
 	"time"
@@ -20,7 +21,7 @@ type Hub struct {
 	temptCacheSession sync.Map
 	//clientId->*NetClient
 	clients sync.Map
-	//bucketId->*NetBucket
+	//id->*NetBucket
 	buckets sync.Map
 	*Group
 	*handlerMgr
@@ -42,9 +43,6 @@ func New(options *HubOptions) *Hub {
 		}
 		client.ClientId = params.ClientId
 		client.GroupId = params.BucketId
-		client.state.Store(LOGINED)
-		client.OnLogin.RiseEvent(nil)
-		r.onClientLogin(client)
 		return "成功", nil
 	})
 
@@ -70,6 +68,7 @@ func New(options *HubOptions) *Hub {
 type HubServerOptions struct {
 	Codec      ICodec
 	Crypto     *Crypto
+	NeedLogin  bool
 	ServerOpts []func(opt *ServerOptions)
 }
 
@@ -81,6 +80,10 @@ func WithCodec(codec ICodec) HubServerOption {
 
 func WithCrypto(crypto *Crypto) HubServerOption {
 	return func(opts *HubServerOptions) { opts.Crypto = crypto }
+}
+
+func WithNeedLogin(needLogin bool) HubServerOption {
+	return func(opts *HubServerOptions) { opts.NeedLogin = needLogin }
 }
 
 func WithServerOpts(serOpts ...func(opt *ServerOptions)) HubServerOption {
@@ -109,8 +112,9 @@ func (n *Hub) ListenAndServeUdp(addr string, listenerCount int, opts ...HubServe
 				RetryInterval:    n.options.RetryInterval,
 				PacketCodec:      options.Codec,
 				Crypto:           options.Crypto,
+				NeedLogin:        options.NeedLogin,
 			})
-			client.state.Store(CONNECTED)
+			client.changeState(CONNECTED)
 			client.handlerMgr = n.handlerMgr
 
 			value, _ = addrToClient.LoadOrStore(addr, client)
@@ -138,8 +142,12 @@ func (n *Hub) ListenAndServeTcp(addr string, listenerCount int, opts ...HubServe
 			RetryInterval:    n.options.RetryInterval,
 			PacketCodec:      options.Codec,
 			Crypto:           options.Crypto,
+			NeedLogin:        options.NeedLogin,
 		})
-		client.state.Store(CONNECTED)
+		client.OnLogin.AddEventListener(func(data interface{}) {
+			n.onClientLogin(client)
+		})
+		client.changeState(CONNECTED)
 		client.handlerMgr = n.handlerMgr
 
 		conn.ListenToOnMessage(func(data interface{}) {
@@ -171,6 +179,10 @@ func (n *Hub) ListenAndServeWebsocket(addr string, opts ...HubServerOption) *Web
 			RetryInterval:    n.options.RetryInterval,
 			PacketCodec:      options.Codec,
 			Crypto:           options.Crypto,
+			NeedLogin:        options.NeedLogin,
+		})
+		client.OnLogin.AddEventListener(func(data interface{}) {
+			n.onClientLogin(client)
 		})
 		client.changeState(CONNECTED)
 		client.handlerMgr = n.handlerMgr
@@ -211,26 +223,47 @@ func (n *Hub) TemptSaveSession(data SessionData) {
 	}()
 }
 
-func (n *Hub) FindClient(clientId string) (*Client, bool) {
-	client, ok := n.clients.Load(clientId)
+func (n *Hub) FindClient(id string) (*Client, bool) {
+	value, ok := n.clients.Load(id)
 	if !ok {
 		return nil, false
 	}
-	return client.(*Client), ok
+	return value.(*Client), true
+}
+
+func (n *Hub) AddClient(client *Client) {
+	logger.Info("hub新增加客户端", zap.String("clientId", client.ClientId))
+	n.clients.Store(client.ClientId, client)
+}
+
+func (n *Hub) RemoveClient(clientId string) {
+	logger.Info("hub移除客户端", zap.String("clientId", clientId))
+	n.clients.Delete(clientId)
 }
 
 func (n *Hub) onClientLogin(new *Client) {
-	if client, ok := n.FindClient(new.ClientId); ok {
+	if client, loaded := n.clients.LoadAndDelete(new.ClientId); loaded {
 		logger.Error(fmt.Sprintf("clientId【%v】已连接,关闭旧连接", new.ClientId))
-		client.Dispose()
+		client.(*Client).Dispose()
 	}
-
+	n.AddClient(new)
 	if new.GroupId != nil {
 		group := n.FindOrCreateGroup(*new.GroupId)
 		group.AddClient(new)
 	} else {
-		n.AddClient(new)
+		n.Group.AddClient(new)
 	}
+
+	new.OnDispose.AddEventListener(func(data interface{}) {
+		n.RemoveClient(new.ClientId)
+		n.clients.Delete(new.ClientId)
+		if new.GroupId != nil {
+			group := n.FindOrCreateGroup(*new.GroupId)
+			group.AddClient(new)
+		} else {
+			n.Group.AddClient(new)
+		}
+	})
 }
 
 type SessionData struct {

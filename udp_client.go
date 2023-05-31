@@ -170,7 +170,7 @@ func DialHubUdp(addr string, params LoginParams) *Client {
 		if err != nil {
 			logger.Info("udp连接失败", zap.Error(err))
 			time.Sleep(time.Second * 3)
-			tryConn()
+			go tryConn()
 			return
 		}
 		client.conn = conn
@@ -178,16 +178,13 @@ func DialHubUdp(addr string, params LoginParams) *Client {
 			logger.Info("udp断开连接")
 			client.ClearAllSubTopics()
 			time.Sleep(3 * time.Second)
-			tryConn()
+			go tryConn()
 		})
 		conn.OnMessage.AddEventListener(func(data interface{}) {
 			client.receiveMessage(data.([]byte))
 		})
 		conn.StartReadWrite(5)
 		for {
-			if conn.IsClosed() {
-				return
-			}
 			err = client.Login(&params)
 			if err != nil {
 				logger.Error("登录失败", zap.Error(err), zap.Any("login params", params))
@@ -196,7 +193,6 @@ func DialHubUdp(addr string, params LoginParams) *Client {
 				break
 			}
 		}
-		client.OnLogin.RiseEvent(nil)
 	}
 	go tryConn()
 	return client

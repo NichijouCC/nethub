@@ -71,7 +71,7 @@ func TestClient_Subscribe(t *testing.T) {
 	select {}
 }
 
-func TestClient_wesocket_Subscribe(t *testing.T) {
+func TestClient_websocket_Subscribe(t *testing.T) {
 	var projectId int64 = 53010217439105
 	client := DialHubWebsocket("ws://127.0.0.1:1555", LoginParams{ClientId: uuid.New().String(), BucketId: &projectId})
 	client.OnLogin.AddEventListener(func(data interface{}) {
@@ -90,13 +90,12 @@ func TestClient_Publish(t *testing.T) {
 		RetryInterval:    3,
 		Crypto:           NewCrypto(),
 	})
-	client.OnLogin.AddEventListener(func(data interface{}) {
-		//模拟实时上报消息
-		ticker := time.NewTicker(time.Second)
-		for range ticker.C {
+	ticker := time.NewTicker(time.Second)
+	for range ticker.C {
+		if client.state.Load().(clientState) == LOGINED {
 			client.Publish("rt_message", []byte(`{"timestamp": 1671610334.1461706, "network_latency": 100.0, "longitude": 101.75232644, "latitude": 26.63366599, "altitude": 1116.06578656}`))
 		}
-	})
+	}
 	select {}
 }
 
