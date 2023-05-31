@@ -6,7 +6,7 @@ import (
 )
 
 func DialHubWebsocket(addr string, params LoginParams) *Client {
-	var client = newClient(nil, &ClientOptions{HeartbeatTimeout: 5, WaitTimeout: 5, RetryInterval: 3})
+	var client = newClient(nil, &ClientOptions{HeartbeatTimeout: 5, WaitTimeout: 5, RetryInterval: 3, NeedLogin: true})
 	client.beClient.Store(true)
 
 	var tryConn func()
@@ -20,7 +20,6 @@ func DialHubWebsocket(addr string, params LoginParams) *Client {
 			return
 		}
 		client.conn = ws
-		client.changeState(CONNECTED)
 		ws.OnMessage.AddEventListener(func(data interface{}) {
 			client.receiveMessage(data.([]byte))
 		})
@@ -32,6 +31,7 @@ func DialHubWebsocket(addr string, params LoginParams) *Client {
 			go tryConn()
 		})
 		ws.StartReadWrite()
+		client.changeState(CONNECTED)
 		for {
 			err = client.Login(&params)
 			if err != nil {

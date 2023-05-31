@@ -14,8 +14,8 @@ func TestHub_ListenAndServe(t *testing.T) {
 		RetryInterval:    3,
 	})
 	hub.ListenAndServeUdp(":1234", 2)
-	hub.ListenAndServeTcp(":1235", 2, WithCrypto(NewCrypto()))
-	hub.ListenAndServeWebsocket(":1555")
+	hub.ListenAndServeTcp(":1235", 2, WithCrypto(NewCrypto()), WithNeedLogin(true))
+	hub.ListenAndServeWebsocket(":1555", WithNeedLogin(true))
 	select {}
 }
 

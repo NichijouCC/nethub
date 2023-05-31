@@ -41,6 +41,7 @@ func New(options *HubOptions) *Hub {
 		if err != nil {
 			return "失败", err
 		}
+		logger.Info(fmt.Sprintf("[%v]设置clientId为[%v]", client.ClientId, params.ClientId))
 		client.ClientId = params.ClientId
 		client.GroupId = params.BucketId
 		return "成功", nil
@@ -256,12 +257,11 @@ func (n *Hub) onClientLogin(new *Client) {
 
 	new.OnDispose.AddEventListener(func(data interface{}) {
 		n.RemoveClient(new.ClientId)
-		n.clients.Delete(new.ClientId)
 		if new.GroupId != nil {
 			group := n.FindOrCreateGroup(*new.GroupId)
-			group.AddClient(new)
+			group.RemoveClient(new.ClientId)
 		} else {
-			n.Group.AddClient(new)
+			n.Group.RemoveClient(new.ClientId)
 		}
 	})
 }

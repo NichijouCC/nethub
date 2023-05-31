@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
-	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -158,12 +157,8 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 				if state == LOGINED {
 					//如果无发送包,定时发送心跳包
 					if cli.lastTxTime.Load() == nil || time.Now().Sub(cli.lastTxTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000*0.3) {
-						if cli.lastTxTime.Load() != nil {
-							logger.Info(fmt.Sprintf("[%v]心跳包发送时间:%v", cli.ClientId, time.Now()))
-						}
 						var heartbeat HeartbeatPacket = ""
 						cli.SendPacket(&heartbeat)
-
 					}
 				}
 
@@ -181,7 +176,7 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 			}
 		}
 	}()
-
+	logger.Info(fmt.Sprintf("初始化client[%v]", cli.ClientId))
 	return cli
 }
 
@@ -282,7 +277,7 @@ func (m *Client) changeState(to clientState) {
 	}
 	old := m.state.Swap(to)
 	if old != to && to == LOGINED {
-		log.Println("客户端登录成功", zap.String("clientId", m.ClientId))
+		logger.Info(fmt.Sprintf("[%v]客户端登录成功!", m.ClientId))
 		m.OnLogin.RiseEvent(nil)
 	}
 }
@@ -695,6 +690,7 @@ func (m *Client) Login(params *LoginParams) error {
 		}
 		m.changeState(EXCHANGED_SECRET)
 	}
+	logger.Info(fmt.Sprintf("[%v]设置clientId为[%v]", m.ClientId, params.ClientId))
 	m.ClientId = params.ClientId
 	m.GroupId = params.BucketId
 	data, _ := json.Marshal(params)

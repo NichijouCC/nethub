@@ -20,7 +20,6 @@ func DialHubTcp(addr string, params LoginParams, opts *ClientOptions) *Client {
 			return
 		}
 		client.conn = conn
-		client.changeState(CONNECTED)
 		conn.OnMessage.AddEventListener(func(data interface{}) {
 			client.receiveMessage(data.([]byte))
 		})
@@ -32,6 +31,7 @@ func DialHubTcp(addr string, params LoginParams, opts *ClientOptions) *Client {
 			go tryConn()
 		})
 		conn.StartReadWrite()
+		client.changeState(CONNECTED)
 		for {
 			if conn.IsClosed() {
 				return

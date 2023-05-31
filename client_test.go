@@ -45,6 +45,7 @@ func TestClient_SubscribeAttributes(t *testing.T) {
 		WaitTimeout:      5,
 		RetryInterval:    3,
 		Crypto:           NewCrypto(),
+		NeedLogin:        true,
 	})
 	client.OnLogin.AddEventListener(func(data interface{}) {
 		var gpsAtts = []string{"longitude", "latitude", "altitude", "yaw"}
@@ -75,7 +76,7 @@ func TestClient_websocket_Subscribe(t *testing.T) {
 	var projectId int64 = 53010217439105
 	client := DialHubWebsocket("ws://127.0.0.1:1555", LoginParams{ClientId: uuid.New().String(), BucketId: &projectId})
 	client.OnLogin.AddEventListener(func(data interface{}) {
-		client.Subscribe("+/rt_message", func(data *PublishPacket, from *Client) {
+		go client.Subscribe("+/rt_message", func(data *PublishPacket, from *Client) {
 			log.Println(data.ClientId, string(data.Params))
 		})
 	})
@@ -89,6 +90,7 @@ func TestClient_Publish(t *testing.T) {
 		WaitTimeout:      5,
 		RetryInterval:    3,
 		Crypto:           NewCrypto(),
+		NeedLogin:        true,
 	})
 	ticker := time.NewTicker(time.Second)
 	for range ticker.C {
