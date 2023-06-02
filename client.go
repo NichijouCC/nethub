@@ -284,6 +284,7 @@ func (m *Client) changeState(to clientState) {
 
 func (m *Client) onReceiveRequest(pkt *Packet) {
 	request := pkt.PacketContent.(*RequestPacket)
+	request.ClientId = m.ClientId
 	if request.Id != "" {
 		//收到请求就回复一个ack
 		m.SendPacket(&AckPacket{Id: request.Id})
@@ -355,12 +356,12 @@ func (m *Client) onReceiveAck(pkt *Packet) {
 
 func (m *Client) onReceivePublish(pkt *Packet) {
 	request := pkt.PacketContent.(*PublishPacket)
+	request.ClientId = m.ClientId
 	if request.Id != "" {
 		m.SendPacket(&AckPacket{Id: request.Id})
 	}
 	if m.Group != nil {
 		request.Topic = fmt.Sprintf("%v/%v", m.ClientId, request.Topic)
-		request.ClientId = m.ClientId
 		m.Group.PubTopic(request, m)
 	} else {
 		m.PubTopic(request, m)
