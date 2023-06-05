@@ -63,11 +63,11 @@ func (m *Map) RemovePlayerFromGrid(playerId int64, gridId int) {
 	m.grids[gridId].RemovePlayer(playerId)
 }
 
-func (m *Map) GetAroundGridsByPos(x, y float32) []*Grid {
+func (m *Map) GetAroundGridsByPos(x, y float32) map[int]*Grid {
 	idx := int(math.Floor(float64((x - m.MinX) / m.gridX)))
 	idy := int(math.Floor(float64((y - m.MinY) / m.gridY)))
 
-	var grids []*Grid
+	var grids map[int]*Grid
 	for i := -1; i <= 1; i++ {
 		aroundX := i + idx
 		if aroundX < 0 || aroundX > m.xGridCount-1 {
@@ -79,18 +79,8 @@ func (m *Map) GetAroundGridsByPos(x, y float32) []*Grid {
 				continue
 			}
 			gid := aroundX + aroundY*m.xGridCount
-			grids = append(grids, m.grids[gid])
+			grids[gid] = m.grids[gid]
 		}
 	}
 	return grids
-}
-
-func (m *Map) AroundPlayersRange(x, y float32, f func(playerId int64)) {
-	grids := m.GetAroundGridsByPos(x, y)
-	for _, grid := range grids {
-		grid.PlayerIds.Range(func(key, value any) bool {
-			f(key.(int64))
-			return true
-		})
-	}
 }
