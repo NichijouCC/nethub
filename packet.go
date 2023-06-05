@@ -93,9 +93,9 @@ func (r *BroadcastPacket) GetId() string {
 }
 
 type ResponsePacket struct {
-	Id     string      `json:"id,omitempty"`
-	Result interface{} `json:"result,omitempty"`
-	Error  string      `json:"error,omitempty"`
+	Id     string `json:"id,omitempty"`
+	Result []byte `json:"result,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 func (r *ResponsePacket) TypeCode() PacketTypeCode {

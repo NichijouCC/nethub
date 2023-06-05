@@ -1,0 +1,103 @@
+//protoc --proto_path=game --go_out=game/pb --go_opt=paths=source_relative  game/*.proto
+syntax = "proto3";
+option go_package = "/pb";
+//包名
+package pb;
+
+message Request {
+  string Id=1;
+  int32 Method=2;
+  bytes Params=3;
+}
+
+message Response {
+  string Id=1;
+  bytes Result =2;
+  string Error=3;
+}
+
+message Ack{
+  string Id=1;
+}
+
+//玩家登录 tcp
+message Login{
+  message Req{
+    int64 UserId=1;
+    string Token=2;
+  }
+  message Resp{
+  }
+}
+
+//玩家初始化 udp
+message InitUser{
+  message Req{
+    int64 UserId=1;
+    string Token=2;
+  }
+  message Resp{
+    int32 MapId=1;
+    repeated float Position=2;
+    float Yaw=3;
+  }
+}
+
+//玩家移动 udp
+message UserMoveReq{
+  repeated float Position =1;
+  float Yaw=2;
+  float Speed=3;
+  float Timestamp=4;
+}
+
+//玩家离开 udp
+message UserLeaveReq{
+  repeated int64 UserIds =1;
+}
+
+//同步周边存在玩家 udp
+message AroundLivesReq{
+  repeated int64 UserIds =1;
+}
+
+//跳地图 udp
+message JumpMap{
+  message Req{
+    int32 MapId=1;
+  }
+  message Resp{
+    repeated float Position=1;
+    float Yaw=2;
+  }
+}
+
+//世界聊天
+message WorldChatReq{
+  string Content=1;
+  int64 FromUserId=2;
+  string FromUserName=3;
+}
+
+//私聊
+message PrivateChatReq{
+  int64 ToUserId=1;
+  string Content=2;
+  int64 FromUserId=3;
+  string FromUserName=4;
+}
+
+//组队聊天
+message GroupChatReq{
+  int64 ToGroupId=1;
+  string Content=2;
+  int64 FromUserId=3;
+  string FromUserName=4;
+}
+
+//本地聊天
+message LocalChatReq{
+  string Content=1;
+  int64 FromUserId=2;
+  string FromUserName=3;
+}

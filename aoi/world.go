@@ -1,18 +1,22 @@
 package aoi
 
-type World struct {
-	maps map[int]*Map
+type MapWorld struct {
+	maps map[int32]*Map
 }
 
-var world *World
+var World *MapWorld
 
-func InitWorld(data map[int]mapData) {
-	world = &World{map[int]*Map{}}
+func InitMapWorld(data map[int32]MapData) {
+	World = &MapWorld{map[int32]*Map{}}
 	for mId, m := range data {
-		world.maps[mId] = NewMap(mId, m.minX, m.maxX, m.minY, m.maxY, m.gridX, m.gridY)
+		World.maps[mId] = NewMap(mId, m)
 	}
 }
 
-type mapData struct {
-	minX, maxX, minY, maxY, gridX, gridY float32
+type MapData struct {
+	minX, maxX, minY, maxY, gridX, gridY, initX, initY, initZ, initYaw float32
+}
+
+func (m *MapWorld) FindMap(mapId int32) *Map {
+	return m.maps[mapId]
 }

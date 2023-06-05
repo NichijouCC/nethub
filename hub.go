@@ -1,8 +1,6 @@
 package nethub
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
 	"go.uber.org/zap"
 	"net"
@@ -14,6 +12,7 @@ type HubOptions struct {
 	HeartbeatTimeout float64
 	RetryTimeout     float64
 	RetryInterval    float64
+	handlerMgr       *HandlerMgr
 }
 
 type Hub struct {
@@ -24,44 +23,45 @@ type Hub struct {
 	//id->*NetBucket
 	buckets sync.Map
 	*Group
-	*handlerMgr
 	options *HubOptions
 }
 
 func New(options *HubOptions) *Hub {
-	r := &Hub{
-		Group:      newGroup(-1, nil),
-		handlerMgr: &handlerMgr{},
-		options:    options,
+	if options.handlerMgr == nil {
+		options.handlerMgr = &HandlerMgr{}
 	}
 
-	r.RegisterRequestHandler("login", func(req *RequestPacket, client *Client) (interface{}, error) {
-		var params LoginParams
-		err := json.Unmarshal(req.Params, &params)
-		if err != nil {
-			return "失败", err
-		}
-		logger.Info(fmt.Sprintf("[%v]设置clientId为[%v]", client.ClientId, params.ClientId))
-		client.ClientId = params.ClientId
-		client.GroupId = params.BucketId
-		return "成功", nil
-	})
-
-	r.RegisterRequestHandler(EXCHANGE_SECRET, func(req *RequestPacket, client *Client) (interface{}, error) {
-		var params ExchangeSecretParams
-		err := json.Unmarshal(req.Params, &params)
-		if err != nil {
-			return nil, fmt.Errorf("params unmarshal err:%v", err.Error())
-		}
-		if client.options.Crypto == nil {
-			return nil, errors.New("未启用加密通信")
-		}
-		pubkey, err := client.options.Crypto.ComputeSecret(params.PubKey)
-		if err != nil {
-			return nil, fmt.Errorf("交换密钥失败,secret出错:%v", err.Error())
-		}
-		return pubkey, nil
-	})
+	r := &Hub{
+		Group:   newGroup(-1, nil),
+		options: options,
+	}
+	//r.options.handlerMgr.RegisterRequestHandler("login", func(req *RequestPacket, client *Client) ([]byte, error) {
+	//	var params LoginParams
+	//	err := json.Unmarshal(req.Params, &params)
+	//	if err != nil {
+	//		return "失败", err
+	//	}
+	//	logger.Info(fmt.Sprintf("[%v]设置clientId为[%v]", client.ClientId, params.ClientId))
+	//	client.ClientId = params.ClientId
+	//	client.GroupId = params.BucketId
+	//	return "成功", nil
+	//})
+	//
+	//r.options.handlerMgr.RegisterRequestHandler(EXCHANGE_SECRET, func(req *RequestPacket, client *Client) ([]byte, error) {
+	//	var params ExchangeSecretParams
+	//	err := json.Unmarshal(req.Params, &params)
+	//	if err != nil {
+	//		return nil, fmt.Errorf("params unmarshal err:%v", err.Error())
+	//	}
+	//	if client.options.Crypto == nil {
+	//		return nil, errors.New("未启用加密通信")
+	//	}
+	//	pubkey, err := client.options.Crypto.ComputeSecret(params.PubKey)
+	//	if err != nil {
+	//		return nil, fmt.Errorf("交换密钥失败,secret出错:%v", err.Error())
+	//	}
+	//	return pubkey, nil
+	//})
 
 	return r
 }
@@ -71,6 +71,7 @@ type HubServerOptions struct {
 	Crypto     *Crypto
 	NeedLogin  bool
 	ServerOpts []func(opt *ServerOptions)
+	handlerMgr *HandlerMgr
 }
 
 type HubServerOption func(opts *HubServerOptions)
@@ -85,6 +86,9 @@ func WithCrypto(crypto *Crypto) HubServerOption {
 
 func WithNeedLogin(needLogin bool) HubServerOption {
 	return func(opts *HubServerOptions) { opts.NeedLogin = needLogin }
+}
+func WithHandlerMgr(mgr *HandlerMgr) HubServerOption {
+	return func(opts *HubServerOptions) { opts.handlerMgr = mgr }
 }
 
 func WithServerOpts(serOpts ...func(opt *ServerOptions)) HubServerOption {
@@ -116,7 +120,7 @@ func (n *Hub) ListenAndServeUdp(addr string, listenerCount int, opts ...HubServe
 				NeedLogin:        options.NeedLogin,
 			})
 			client.changeState(CONNECTED)
-			client.handlerMgr = n.handlerMgr
+			client.HandlerMgr = n.options.handlerMgr
 
 			value, _ = addrToClient.LoadOrStore(addr, client)
 			client = value.(*Client)
@@ -149,7 +153,7 @@ func (n *Hub) ListenAndServeTcp(addr string, listenerCount int, opts ...HubServe
 			n.onClientLogin(client)
 		})
 		client.changeState(CONNECTED)
-		client.handlerMgr = n.handlerMgr
+		client.HandlerMgr = options.handlerMgr
 
 		conn.ListenToOnMessage(func(data interface{}) {
 			client.receiveMessage(data.([]byte))
@@ -171,6 +175,9 @@ func (n *Hub) ListenAndServeWebsocket(addr string, opts ...HubServerOption) *Web
 	if options.Codec == nil {
 		options.Codec = defaultCodec
 	}
+	if options.handlerMgr == nil {
+		options.handlerMgr = n.options.handlerMgr
+	}
 	//websocket Server
 	ws := NewWebsocketServer(addr, options.ServerOpts...)
 	ws.OnClientConnect = func(conn *WebsocketConn) {
@@ -186,7 +193,7 @@ func (n *Hub) ListenAndServeWebsocket(addr string, opts ...HubServerOption) *Web
 			n.onClientLogin(client)
 		})
 		client.changeState(CONNECTED)
-		client.handlerMgr = n.handlerMgr
+		client.HandlerMgr = options.handlerMgr
 
 		conn.ListenToOnMessage(func(data interface{}) {
 			client.receiveMessage(data.([]byte))

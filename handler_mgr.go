@@ -4,7 +4,7 @@ import (
 	"sync"
 )
 
-type handlerMgr struct {
+type HandlerMgr struct {
 	//map[string]requestHandler
 	handlers sync.Map
 	//map[string]streamHandler
@@ -13,11 +13,11 @@ type handlerMgr struct {
 	defaultStreamHandler streamHandler
 }
 
-func (h *handlerMgr) RegisterRequestHandler(method string, handler requestHandler) {
+func (h *HandlerMgr) RegisterRequestHandler(method string, handler requestHandler) {
 	h.handlers.Store(method, handler)
 }
 
-func (h *handlerMgr) findRequestHandler(method string) (requestHandler, bool) {
+func (h *HandlerMgr) findRequestHandler(method string) (requestHandler, bool) {
 	handler, loaded := h.handlers.Load(method)
 	if loaded {
 		return handler.(requestHandler), true
@@ -28,11 +28,11 @@ func (h *handlerMgr) findRequestHandler(method string) (requestHandler, bool) {
 	return nil, false
 }
 
-func (h *handlerMgr) RegisterStreamHandler(method string, handler streamHandler) {
+func (h *HandlerMgr) RegisterStreamHandler(method string, handler streamHandler) {
 	h.streamHandlers.Store(method, handler)
 }
 
-func (h *handlerMgr) findStreamHandler(method string) (streamHandler, bool) {
+func (h *HandlerMgr) findStreamHandler(method string) (streamHandler, bool) {
 	handler, loaded := h.streamHandlers.Load(method)
 	if loaded {
 		return handler.(streamHandler), true

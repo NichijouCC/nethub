@@ -65,7 +65,7 @@ type Client struct {
 	packetHandler map[PacketTypeCode]func(pkt *Packet)
 	lastTxTime    atomic.Value
 
-	*handlerMgr
+	*HandlerMgr
 	//正在处理的request,struct{}
 	handlingReq sync.Map
 	//等待Response回复,*flyPacket
@@ -105,7 +105,7 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 		lastRxTime:    atomic.Value{},
 		packetHandler: map[PacketTypeCode]func(pkt *Packet){},
 		rxQueue:       make(chan *Packet, RxQueueLen),
-		handlerMgr:    &handlerMgr{},
+		HandlerMgr:    &HandlerMgr{},
 		PubSub:        newPubSub(ctx, ClientPubChLen),
 		options:       opts,
 	}
@@ -717,7 +717,7 @@ func (m *Client) Dispose() {
 type flyPacket struct {
 	resultBack chan struct{}
 	ackBack    chan struct{}
-	result     interface{}
+	result     []byte
 	err        error
 }
 
@@ -762,11 +762,11 @@ func (s streamHandler) execute(first *Packet, stream *Stream) error {
 	return executeErr
 }
 
-type requestHandler func(req *RequestPacket, from *Client) (interface{}, error)
+type requestHandler func(req *RequestPacket, from *Client) ([]byte, error)
 
-func (r requestHandler) execute(req *RequestPacket, client *Client) (interface{}, error) {
+func (r requestHandler) execute(req *RequestPacket, client *Client) ([]byte, error) {
 	var executeErr error
-	var result interface{}
+	var result []byte
 	func() {
 		defer func() {
 			if err := recover(); err != nil {

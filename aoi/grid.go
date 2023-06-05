@@ -3,12 +3,12 @@ package aoi
 import "sync"
 
 type Grid struct {
-	Id        int
-	MinX      float32
-	MaxX      float32
-	MinY      float32
-	MaxY      float32
-	PlayerIds sync.Map
+	Id      int
+	MinX    float32
+	MaxX    float32
+	MinY    float32
+	MaxY    float32
+	Players sync.Map
 }
 
 func NewGrid(gId int, minX, maxX, minY, maxY float32) *Grid {
@@ -21,10 +21,10 @@ func NewGrid(gId int, minX, maxX, minY, maxY float32) *Grid {
 	}
 }
 
-func (g *Grid) AddPlayer(playerId int64) {
-	g.PlayerIds.Store(playerId, struct{}{})
+func (g *Grid) AddPlayer(player *Player) {
+	g.Players.Store(player.Id, struct{}{})
 }
 
 func (g *Grid) RemovePlayer(PlayerId int64) {
-	g.PlayerIds.Delete(PlayerId)
+	g.Players.Delete(PlayerId)
 }

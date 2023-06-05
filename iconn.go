@@ -11,7 +11,7 @@ type IConn interface {
 	Close()
 
 	IsClosed() bool
-	
+
 	RemoteAddr() net.Addr
 
 	ListenToOnMessage(func(data interface{}))

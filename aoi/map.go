@@ -5,39 +5,43 @@ import (
 )
 
 type Map struct {
-	Id    int
-	MinX  float32
-	MaxX  float32
-	MinY  float32
-	MaxY  float32
-	gridX float32
-	gridY float32
-
-	EnterPos []float32
+	Id                           int32
+	MinX                         float32
+	MaxX                         float32
+	MinY                         float32
+	MaxY                         float32
+	gridX                        float32
+	gridY                        float32
+	initX, initY, initZ, initYaw float32
+	EnterPos                     []float32
 
 	xGridCount int
 	yGridCount int
 	grids      map[int]*Grid
 }
 
-func NewMap(mId int, minX, maxX, minY, maxY float32, gridX float32, gridY float32) *Map {
-	xGridCount := int(math.Ceil(float64((maxX - minX) / gridX)))
-	yGridCount := int(math.Ceil(float64((maxY - minY) / gridY)))
+func NewMap(mId int32, data MapData) *Map {
+	xGridCount := int(math.Ceil(float64((data.maxX - data.minX) / data.gridX)))
+	yGridCount := int(math.Ceil(float64((data.maxY - data.minY) / data.gridY)))
 	m := &Map{
 		Id:         mId,
-		MinX:       minX,
-		MaxX:       maxX,
-		MinY:       minY,
-		MaxY:       maxY,
-		gridX:      gridX,
-		gridY:      gridY,
+		MinX:       data.minX,
+		MaxX:       data.maxX,
+		MinY:       data.minY,
+		MaxY:       data.maxY,
+		gridX:      data.gridX,
+		gridY:      data.gridY,
+		initX:      data.initX,
+		initY:      data.initY,
+		initZ:      data.initZ,
+		initYaw:    data.initYaw,
 		xGridCount: yGridCount,
 		yGridCount: yGridCount,
 	}
 	for y := 0; y < yGridCount; y++ {
 		for x := 0; x < xGridCount; x++ {
 			gid := y*xGridCount + x
-			m.grids[gid] = NewGrid(gid, minX+float32(x)*gridX, minX+(float32(x)+1)*gridX, minY+float32(y)*gridY, minY+(float32(y)+1)*gridY)
+			m.grids[gid] = NewGrid(gid, data.minX+float32(x)*data.gridY, data.minX+(float32(x)+1)*data.gridX, data.minY+float32(y)*data.gridY, data.minY+(float32(y)+1)*data.gridY)
 		}
 	}
 	return m
@@ -55,8 +59,8 @@ func (m *Map) GetGridByPos(x, y float32) *Grid {
 	return m.grids[idx+idy*m.xGridCount]
 }
 
-func (m *Map) AddPlayerToGrid(playerId int64, gridId int) {
-	m.grids[gridId].AddPlayer(playerId)
+func (m *Map) AddPlayerToGrid(player *Player, gridId int) {
+	m.grids[gridId].AddPlayer(player)
 }
 
 func (m *Map) RemovePlayerFromGrid(playerId int64, gridId int) {
