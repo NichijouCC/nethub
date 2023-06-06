@@ -1,0 +1,46 @@
+//指定版本
+syntax = "proto3";
+option go_package = "/pb";
+//包名
+package pb;
+
+message GetUser {
+  message Req{
+
+  }
+}
+
+message User{
+  int64 Id=1;
+  string Name=2;
+  int64 Score=3;
+  int32 Sex=4;
+  string Sign=5;
+  int32 GunBattleLevel=6;
+  int32 GunBattleScore=7;
+  int32 PKLevel=8;
+  int32 PKScore=9;
+  int32 GuardTowerLevel=10;
+  int32 GuardTowerScore=11;
+}
+
+enum FightType {
+  PK=0;
+  GUN_BATTLE=1;
+  GUARD_TOWER=2;
+}
+
+message FightRecord{
+  FightType FightType=1;
+  //开始时间,毫秒
+  int64 Timestamp=2;
+  //时长，毫秒
+  int64 Duration=3;
+  int32 Score=4;
+  string Desc=5;
+  bool BeWin=6;
+}
+
+service PPCity {
+  rpc GetUser(GetUser.Req) returns (User);
+}

@@ -118,16 +118,16 @@ func (p *Player) UpdatePos(msg PosMessage) {
 			}
 			NotifyLeave(p, leaves)
 		}
-		//通知周边玩家,自身位置/加速度/
-		if NotifyMove != nil {
-			for _, grid := range p.AroundGrids {
-				grid.Players.Range(func(key, value any) bool {
-					if key.(int64) != p.Id {
-						NotifyMove(value.(*Player), msg)
-					}
-					return true
-				})
-			}
+	}
+	//通知周边玩家,自身位置/加速度/
+	if NotifyMove != nil {
+		for _, grid := range p.AroundGrids {
+			grid.Players.Range(func(key, value any) bool {
+				if key.(int64) != p.Id {
+					NotifyMove(value.(*Player), msg)
+				}
+				return true
+			})
 		}
 	}
 }
