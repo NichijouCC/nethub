@@ -32,9 +32,9 @@ func newGroup(id int64, parent *Group) *Group {
 	return bucket
 }
 
-func (m *Group) Broadcast(packet []byte) {
+func (m *Group) Broadcast(pkt *BroadcastPacket) {
 	m.clients.Range(func(key, value any) bool {
-		value.(*Client).SendMessage(packet)
+		value.(*Client).SendPacket(pkt)
 		return true
 	})
 }

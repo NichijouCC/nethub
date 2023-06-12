@@ -10,8 +10,8 @@ import (
 )
 
 type ICodec interface {
-	Marshal(packet INetPacket) []byte
-	Unmarshal(src []byte) (INetPacket, error)
+	Marshal(packet INetPacket, crypto *Crypto) []byte
+	Unmarshal(src []byte, crypto *Crypto) (INetPacket, error)
 }
 
 var defaultCodec = NewSimpleCodec()
@@ -89,11 +89,18 @@ func NewSimpleCodec() *SimpleCodec {
 			return &req, err
 		},
 	}
-	return &SimpleCodec{contentDecoder}
+	return &SimpleCodec{contentDecoder: contentDecoder}
 }
 
-func (m *SimpleCodec) Unmarshal(rawPacket []byte) (INetPacket, error) {
+func (m *SimpleCodec) Unmarshal(rawPacket []byte, crypto *Crypto) (INetPacket, error) {
 	packetStr := string(rawPacket)
+	if strings.HasPrefix(packetStr, "@") {
+		//加密了
+		strArr := strings.Split(packetStr, "@")
+		data := []byte(strArr[1])
+		crypto.Decode(data, data)
+		packetStr = string(data)
+	}
 	strArr := strings.Split(packetStr, "@")
 	intCode, err := strconv.Atoi(strArr[0])
 	if err != nil {
@@ -109,12 +116,17 @@ func (m *SimpleCodec) Unmarshal(rawPacket []byte) (INetPacket, error) {
 	return unmarshal([]byte(strArr[1]))
 }
 
-func (m *SimpleCodec) Marshal(pkt INetPacket) []byte {
-	data, err := json.Marshal(pkt)
+func (m *SimpleCodec) Marshal(pkt INetPacket, crypto *Crypto) []byte {
+	pktBytes, err := json.Marshal(pkt)
 	if err != nil {
 		logger.Error("json Marshal出错", zap.Error(err), zap.Any("PKT", pkt))
 		return nil
 	}
-	dataStr := fmt.Sprintf("%v@%v", pkt.TypeCode(), string(data))
-	return []byte(dataStr)
+	pktData := []byte(fmt.Sprintf("%v@%v", pkt.TypeCode(), string(pktBytes)))
+	if crypto != nil {
+		crypto.Encode(pktData, pktData)
+		return []byte(fmt.Sprintf("@%v", string(pktData)))
+	} else {
+		return pktData
+	}
 }
