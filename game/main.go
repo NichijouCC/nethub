@@ -50,12 +50,14 @@ func main() {
 		}
 	}
 	InitPlayerMgr()
+	InitChatMgr()
 
 	hub := nethub.New(&nethub.HubOptions{
 		HeartbeatTimeout: 15,
 		RetryTimeout:     10,
 		RetryInterval:    10,
 	})
+
 	tcpService := InitTcpService()
 	udpService := InitUdpService()
 

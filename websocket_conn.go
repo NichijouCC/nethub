@@ -174,8 +174,8 @@ func (t *WebsocketConn) Close() {
 	}
 	t.isClosed = true
 	t.cancel()
-	t.OnDisconnect.RiseEvent(nil)
 	t.Conn.Close()
+	go t.OnDisconnect.RiseEvent(nil)
 }
 
 func (t *WebsocketConn) IsClosed() bool {

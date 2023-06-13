@@ -156,12 +156,8 @@ func DialUdp(addr string) (*UdpClient, error) {
 	return client, nil
 }
 
-func DialHubUdp(addr string, params LoginParams) *Client {
-	var client = newClient(nil, &ClientOptions{
-		HeartbeatTimeout: 5,
-		WaitTimeout:      5,
-		RetryInterval:    3,
-	})
+func DialHubUdp(addr string, params LoginParams, opts *ClientOptions) *Client {
+	var client = newClient(nil, opts)
 	client.beClient.Store(true)
 	var tryConn func()
 	tryConn = func() {

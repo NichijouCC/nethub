@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-func DialHubWebsocket(addr string, params LoginParams) *Client {
-	var client = newClient(nil, &ClientOptions{HeartbeatTimeout: 5, WaitTimeout: 5, RetryInterval: 3, NeedLogin: true})
+func DialHubWebsocket(addr string, params LoginParams, opts *ClientOptions) *Client {
+	var client = newClient(nil, opts)
 	client.beClient.Store(true)
 
 	var tryConn func()
@@ -24,14 +24,12 @@ func DialHubWebsocket(addr string, params LoginParams) *Client {
 			client.receiveMessage(data.([]byte))
 		})
 		ws.OnDisconnect.AddEventListener(func(data interface{}) {
-			client.changeState(DISCONNECT)
 			logger.Error("websocket断连.....")
 			client.ClearAllSubTopics()
 			time.Sleep(time.Second * 3)
 			go tryConn()
 		})
 		ws.StartReadWrite()
-		client.changeState(CONNECTED)
 		for {
 			err = client.Login(&params)
 			if err != nil {

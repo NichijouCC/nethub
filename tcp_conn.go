@@ -143,7 +143,7 @@ func (t *TcpConn) Close() {
 	t.Conn.Close()
 	t.isClosed = true
 	t.cancel()
-	t.OnDisconnect.RiseEvent(nil)
+	go t.OnDisconnect.RiseEvent(nil)
 }
 
 func (t *TcpConn) IsClosed() bool {

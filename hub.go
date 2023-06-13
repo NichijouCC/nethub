@@ -103,6 +103,9 @@ func (n *Hub) ListenAndServeUdp(addr string, listenerCount int, opts ...HubServe
 	if options.Codec == nil {
 		options.Codec = defaultCodec
 	}
+	if options.handlerMgr == nil {
+		options.handlerMgr = n.options.handlerMgr
+	}
 	//udp Server
 	udp := NewUdpServer(addr)
 	var addrToClient sync.Map
@@ -119,9 +122,14 @@ func (n *Hub) ListenAndServeUdp(addr string, listenerCount int, opts ...HubServe
 				Crypto:           options.Crypto,
 				NeedLogin:        options.NeedLogin,
 			})
-			client.changeState(CONNECTED)
 			client.HandlerMgr = n.options.handlerMgr
-
+			if client.BeReady() {
+				n.AddClient(client)
+			} else {
+				client.OnReady.AddEventListener(func(data interface{}) {
+					n.AddClient(client)
+				})
+			}
 			value, _ = addrToClient.LoadOrStore(addr, client)
 			client = value.(*Client)
 		}
@@ -138,6 +146,9 @@ func (n *Hub) ListenAndServeTcp(addr string, listenerCount int, opts ...HubServe
 	if options.Codec == nil {
 		options.Codec = defaultCodec
 	}
+	if options.handlerMgr == nil {
+		options.handlerMgr = n.options.handlerMgr
+	}
 	//tcp Server
 	tcp := NewTcpServer(addr, options.ServerOpts...)
 	tcp.OnClientConnect = func(conn *TcpConn) {
@@ -149,18 +160,20 @@ func (n *Hub) ListenAndServeTcp(addr string, listenerCount int, opts ...HubServe
 			Crypto:           options.Crypto,
 			NeedLogin:        options.NeedLogin,
 		})
-		client.OnLogin.AddEventListener(func(data interface{}) {
-			n.onClientLogin(client)
-		})
-		client.changeState(CONNECTED)
 		client.HandlerMgr = options.handlerMgr
+		if client.BeReady() {
+			n.AddClient(client)
+		} else {
+			client.OnReady.AddEventListener(func(data interface{}) {
+				n.AddClient(client)
+			})
+		}
 
 		conn.ListenToOnMessage(func(data interface{}) {
 			client.receiveMessage(data.([]byte))
 		})
 		conn.ListenToOnDisconnect(func(i interface{}) {
 			client.ClearAllSubTopics()
-			client.changeState(DISCONNECT)
 		})
 	}
 	go tcp.ListenAndServe(listenerCount)
@@ -189,18 +202,20 @@ func (n *Hub) ListenAndServeWebsocket(addr string, opts ...HubServerOption) *Web
 			Crypto:           options.Crypto,
 			NeedLogin:        options.NeedLogin,
 		})
-		client.OnLogin.AddEventListener(func(data interface{}) {
-			n.onClientLogin(client)
-		})
-		client.changeState(CONNECTED)
 		client.HandlerMgr = options.handlerMgr
+		if client.BeReady() {
+			n.AddClient(client)
+		} else {
+			client.OnReady.AddEventListener(func(data interface{}) {
+				n.AddClient(client)
+			})
+		}
 
 		conn.ListenToOnMessage(func(data interface{}) {
 			client.receiveMessage(data.([]byte))
 		})
 		conn.ListenToOnDisconnect(func(i interface{}) {
 			client.ClearAllSubTopics()
-			client.changeState(DISCONNECT)
 		})
 	}
 	go ws.ListenAndServe()
@@ -239,22 +254,13 @@ func (n *Hub) FindClient(id string) (*Client, bool) {
 	return value.(*Client), true
 }
 
-func (n *Hub) AddClient(client *Client) {
-	logger.Info("hub新增加客户端", zap.String("clientId", client.ClientId))
-	n.clients.Store(client.ClientId, client)
-}
-
-func (n *Hub) RemoveClient(clientId string) {
-	logger.Info("hub移除客户端", zap.String("clientId", clientId))
-	n.clients.Delete(clientId)
-}
-
-func (n *Hub) onClientLogin(new *Client) {
+func (n *Hub) AddClient(new *Client) {
 	if client, loaded := n.clients.LoadAndDelete(new.ClientId); loaded {
 		logger.Error(fmt.Sprintf("clientId【%v】已连接,关闭旧连接", new.ClientId))
 		client.(*Client).Dispose()
 	}
-	n.AddClient(new)
+	logger.Info("hub新增加客户端", zap.String("clientId", new.ClientId))
+	n.clients.Store(new.ClientId, new)
 	if new.GroupId != nil {
 		group := n.FindOrCreateGroup(*new.GroupId)
 		group.AddClient(new)
@@ -263,7 +269,8 @@ func (n *Hub) onClientLogin(new *Client) {
 	}
 
 	new.OnDispose.AddEventListener(func(data interface{}) {
-		n.RemoveClient(new.ClientId)
+		logger.Info("hub移除客户端", zap.String("clientId", new.ClientId))
+		n.clients.Delete(new.ClientId)
 		if new.GroupId != nil {
 			group := n.FindOrCreateGroup(*new.GroupId)
 			group.RemoveClient(new.ClientId)

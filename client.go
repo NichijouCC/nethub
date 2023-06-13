@@ -52,14 +52,15 @@ type Client struct {
 	Group              *Group
 	GroupId            *int64
 	conn               IConn
-	OnLogin            *EventTarget
+	OnReady            *EventTarget
 	OnDispose          *EventTarget
 	OnHeartbeatTimeout *EventTarget
 	OnPingHandler      func(pkt *PingPacket)
 	OnPongHandler      func(pkt *PongPacket)
 	beDisposed         atomic.Bool
 	state              atomic.Value
-	exchangedSecret    atomic.Bool
+	beExchangedSecret  atomic.Bool
+	beLogin            atomic.Bool
 
 	rxQueue       chan *Packet
 	lastRxTime    atomic.Value
@@ -101,7 +102,7 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 		state:         atomic.Value{},
 		ClientId:      uuid.NewString(),
 		conn:          conn,
-		OnLogin:       newEventTarget(),
+		OnReady:       newEventTarget(),
 		OnDispose:     newEventTarget(),
 		lastRxTime:    atomic.Value{},
 		packetHandler: map[PacketTypeCode]func(pkt *Packet){},
@@ -154,8 +155,7 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 				}
 				handler(pkt)
 			case <-ticker.C:
-				state := cli.state.Load().(clientState)
-				if state == LOGINED {
+				if cli.BeConnected() {
 					//如果无发送包,定时发送心跳包
 					if cli.lastTxTime.Load() == nil || time.Now().Sub(cli.lastTxTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000*0.3) {
 						var heartbeat HeartbeatPacket = ""
@@ -163,13 +163,13 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 					}
 				}
 
-				if time.Now().Sub(cli.lastRxTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000) {
-					if cli.beClient.Load() {
-						if cli.conn != nil && !cli.conn.IsClosed() {
-							logger.Error(fmt.Sprintf("[%v]超时无数据,断开连接.", cli.ClientId))
-							cli.conn.Close()
-						}
-					} else {
+				if cli.beClient.Load() && cli.BeConnected() {
+					if time.Now().Sub(cli.lastRxTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000) {
+						logger.Error(fmt.Sprintf("[%v]超时无数据,断开连接.", cli.ClientId))
+						cli.conn.Close()
+					}
+				} else {
+					if time.Now().Sub(cli.lastRxTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000) {
 						logger.Error(fmt.Sprintf("[%v]超时无数据,断开连接.", cli.ClientId))
 						cli.Dispose()
 					}
@@ -201,8 +201,7 @@ func (m *Client) receiveMessage(rawData []byte) {
 		PacketContent: payload.(INetPacket),
 		Client:        m,
 	}
-	switch m.state.Load().(clientState) {
-	case CONNECTED:
+	if m.options.Crypto != nil && !m.beExchangedSecret.Load() {
 		switch payload.TypeCode() {
 		case REQUEST_PACKET:
 			if payload.(*RequestPacket).Method != EXCHANGE_SECRET {
@@ -214,7 +213,8 @@ func (m *Client) receiveMessage(rawData []byte) {
 			logger.Warn("client还未交互密钥,丢弃消息！", zap.Any("packet", pkt))
 			return
 		}
-	case EXCHANGED_SECRET:
+	}
+	if m.options.NeedLogin && !m.beLogin.Load() {
 		switch payload.TypeCode() {
 		case REQUEST_PACKET:
 			if payload.(*RequestPacket).Method != EXCHANGE_SECRET && payload.(*RequestPacket).Method != LOGIN {
@@ -227,32 +227,29 @@ func (m *Client) receiveMessage(rawData []byte) {
 			return
 		}
 	}
-
 	atomic.AddInt64(&Enqueue, 1)
 	m.lastRxTime.Store(time.Now())
 	m.rxQueue <- pkt
 }
 
-func (m *Client) changeState(to clientState) {
-	switch to {
-	case CONNECTED:
-		if m.options.Crypto == nil {
-			to = EXCHANGED_SECRET
-			if !m.options.NeedLogin {
-				to = LOGINED
-			}
-		}
-	case EXCHANGED_SECRET:
-		if !m.options.NeedLogin {
-			to = LOGINED
-		}
-		logger.Info(fmt.Sprintf("[%v]交换密钥成功!", m.ClientId))
+func (m *Client) BeConnected() bool {
+	if m.conn == nil {
+		return false
 	}
-	old := m.state.Swap(to)
-	if old != to && to == LOGINED {
-		logger.Info(fmt.Sprintf("[%v]客户端登录成功!", m.ClientId))
-		m.OnLogin.RiseEvent(nil)
+	return !m.conn.IsClosed()
+}
+
+func (m *Client) BeReady() bool {
+	if m.conn.IsClosed() {
+		return false
 	}
+	if m.options.Crypto != nil && !m.beExchangedSecret.Load() {
+		return false
+	}
+	if m.options.NeedLogin && !m.beLogin.Load() {
+		return false
+	}
+	return true
 }
 
 func (m *Client) onReceiveRequest(pkt *Packet) {
@@ -286,12 +283,15 @@ func (m *Client) onReceiveRequest(pkt *Packet) {
 				switch request.Method {
 				case EXCHANGE_SECRET:
 					if resp.Error == "" && err == nil {
-						m.exchangedSecret.Store(true)
-						m.changeState(EXCHANGED_SECRET)
+						m.beExchangedSecret.Store(true)
+						if !m.options.NeedLogin {
+							m.OnReady.RiseEvent(nil)
+						}
 					}
 				case LOGIN:
 					if resp.Error == "" && err == nil {
-						m.changeState(LOGINED)
+						m.beLogin.Store(true)
+						m.OnReady.RiseEvent(nil)
 					}
 				}
 
@@ -638,7 +638,7 @@ func (m *Client) SendMessageDirect(message []byte) error {
 
 func (m *Client) SendPacket(packet INetPacket) error {
 	var data []byte
-	if m.exchangedSecret.Load() {
+	if m.beExchangedSecret.Load() {
 		data = m.options.PacketCodec.Marshal(packet, m.options.Crypto)
 	} else {
 		data = m.options.PacketCodec.Marshal(packet, nil)
@@ -648,7 +648,7 @@ func (m *Client) SendPacket(packet INetPacket) error {
 
 func (m *Client) SendPacketDirect(packet INetPacket) error {
 	var data []byte
-	if m.exchangedSecret.Load() {
+	if m.beExchangedSecret.Load() {
 		data = m.options.PacketCodec.Marshal(packet, m.options.Crypto)
 	} else {
 		data = m.options.PacketCodec.Marshal(packet, nil)
@@ -668,8 +668,7 @@ func (m *Client) Login(params *LoginParams) error {
 		if err != nil {
 			return err
 		}
-		m.exchangedSecret.Store(true)
-		m.changeState(EXCHANGED_SECRET)
+		m.beExchangedSecret.Store(true)
 	}
 	logger.Info(fmt.Sprintf("[%v]设置clientId为[%v]", m.ClientId, params.ClientId))
 	m.ClientId = params.ClientId
@@ -677,7 +676,8 @@ func (m *Client) Login(params *LoginParams) error {
 	data, _ := json.Marshal(params)
 	_, err := m.Request("login", data)
 	if err == nil {
-		m.changeState(LOGINED)
+		m.beLogin.Store(true)
+		m.OnReady.RiseEvent(nil)
 	}
 	return err
 }

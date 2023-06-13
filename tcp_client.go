@@ -25,13 +25,11 @@ func DialHubTcp(addr string, params LoginParams, opts *ClientOptions) *Client {
 		})
 		conn.OnDisconnect.AddEventListener(func(data interface{}) {
 			logger.Error("Tcp断连.....")
-			client.changeState(DISCONNECT)
 			client.ClearAllSubTopics()
 			time.Sleep(time.Second * 3)
 			go tryConn()
 		})
 		conn.StartReadWrite()
-		client.changeState(CONNECTED)
 		for {
 			if conn.IsClosed() {
 				return

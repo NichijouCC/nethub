@@ -15,7 +15,7 @@ func TestClient_Request(t *testing.T) {
 		RetryInterval:    3,
 		Crypto:           NewCrypto(),
 	})
-	conn.OnLogin.AddEventListener(func(data interface{}) {
+	conn.OnReady.AddEventListener(func(data interface{}) {
 		//远程调用
 		param, _ := json.Marshal(map[string]interface{}{"a": 1, "b": 2})
 		result, err := conn.Request("load_data", param)
@@ -30,7 +30,7 @@ func TestClient_RequestWithRetry(t *testing.T) {
 		RetryInterval:    3,
 		Crypto:           NewCrypto(),
 	})
-	conn.OnLogin.AddEventListener(func(data interface{}) {
+	conn.OnReady.AddEventListener(func(data interface{}) {
 		//远程调用
 		param, _ := json.Marshal(map[string]interface{}{"a": 1, "b": 2})
 		result, err := conn.RequestWithRetry("load_data", param)
@@ -47,7 +47,7 @@ func TestClient_SubscribeAttributes(t *testing.T) {
 		Crypto:           NewCrypto(),
 		NeedLogin:        true,
 	})
-	client.OnLogin.AddEventListener(func(data interface{}) {
+	client.OnReady.AddEventListener(func(data interface{}) {
 		var gpsAtts = []string{"longitude", "latitude", "altitude", "yaw"}
 		client.SubscribeAttributes("+/rt_message", gpsAtts, func(data *PublishPacket, from *Client) {
 			log.Println(data.ClientId, string(data.Params))
@@ -64,7 +64,7 @@ func TestClient_Subscribe(t *testing.T) {
 		RetryInterval:    3,
 		Crypto:           NewCrypto(),
 	})
-	client.OnLogin.AddEventListener(func(data interface{}) {
+	client.OnReady.AddEventListener(func(data interface{}) {
 		client.Subscribe("+/rt_message", func(data *PublishPacket, from *Client) {
 			log.Println(data.ClientId, string(data.Params))
 		})
@@ -74,8 +74,13 @@ func TestClient_Subscribe(t *testing.T) {
 
 func TestClient_websocket_Subscribe(t *testing.T) {
 	var projectId int64 = 53010217439105
-	client := DialHubWebsocket("ws://127.0.0.1:1555", LoginParams{ClientId: uuid.New().String(), BucketId: &projectId})
-	client.OnLogin.AddEventListener(func(data interface{}) {
+	client := DialHubWebsocket("ws://127.0.0.1:1555", LoginParams{ClientId: uuid.New().String(), BucketId: &projectId}, &ClientOptions{
+		HeartbeatTimeout: 5,
+		WaitTimeout:      5,
+		RetryInterval:    3,
+		Crypto:           NewCrypto(),
+	})
+	client.OnReady.AddEventListener(func(data interface{}) {
 		go client.Subscribe("+/rt_message", func(data *PublishPacket, from *Client) {
 			log.Println(data.ClientId, string(data.Params))
 		})
@@ -109,7 +114,7 @@ func TestClient_StreamRequest(t *testing.T) {
 		RetryInterval:    3,
 		Crypto:           NewCrypto(),
 	})
-	conn.OnLogin.AddEventListener(func(data interface{}) {
+	conn.OnReady.AddEventListener(func(data interface{}) {
 		//初始化流
 		conn.StreamRequest("add", nil, func(stream *Stream) error {
 			go func() {
@@ -156,7 +161,7 @@ func TestClientPing(t *testing.T) {
 		RetryInterval:    3,
 		Crypto:           NewCrypto(),
 	})
-	client.OnLogin.AddEventListener(func(data interface{}) {
+	client.OnReady.AddEventListener(func(data interface{}) {
 		client.OnPongHandler = func(pkt *PongPacket) {
 			log.Println(*pkt)
 		}

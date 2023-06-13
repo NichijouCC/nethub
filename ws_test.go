@@ -14,7 +14,7 @@ func TestWebSub_SubGps(t *testing.T) {
 		//ws, err := DialWebsocket("ws://192.168.9.86:1555")
 		//ws, err := DialWebsocket("ws://139.196.75.44:1555")
 		//sn := fmt.Sprintf("T_%03d", i)
-		ws.OnLogin.AddEventListener(func(data interface{}) {
+		ws.OnReady.AddEventListener(func(data interface{}) {
 			//var topic = fmt.Sprintf("%v/rt_message", sn)
 			err := ws.Subscribe("+/rt_message", func(data *PublishPacket, from *Client) {
 				log.Println(data.ClientId, string(data.Params))

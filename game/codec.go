@@ -12,7 +12,7 @@ import (
 type codec struct {
 }
 
-func (c *codec) Marshal(packet nethub.INetPacket) []byte {
+func (c *codec) Marshal(packet nethub.INetPacket, crypto *nethub.Crypto) []byte {
 	switch packet.TypeCode() {
 	case nethub.REQUEST_PACKET:
 		rawReq := packet.(*nethub.RequestPacket)
@@ -42,7 +42,7 @@ func (c *codec) Marshal(packet nethub.INetPacket) []byte {
 }
 
 // 1byte为消息类型,
-func (c *codec) Unmarshal(src []byte) (nethub.INetPacket, error) {
+func (c *codec) Unmarshal(src []byte, crypto *nethub.Crypto) (nethub.INetPacket, error) {
 	var typeCode = nethub.PacketTypeCode(src[:1][0])
 	switch typeCode {
 	case nethub.REQUEST_PACKET:
