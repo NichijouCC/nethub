@@ -9,10 +9,15 @@ import (
 )
 
 type HubOptions struct {
+	//定时发送心跳包, 0 不发送心跳包
+	HeartbeatInterval float64
+	//等待心跳包超时, 0 不校验超时
 	HeartbeatTimeout float64
-	RetryTimeout     float64
-	RetryInterval    float64
-	handlerMgr       *HandlerMgr
+	//等待Response
+	WaitTimeout float64
+	//等待回复超时重试时间间隔
+	RetryInterval float64
+	handlerMgr    *HandlerMgr
 }
 
 type Hub struct {
@@ -115,12 +120,13 @@ func (n *Hub) ListenAndServeUdp(addr string, listenerCount int, opts ...HubServe
 			client = value.(*Client)
 		} else {
 			client = newClient(&fakeUdpConn{Addr: addr, listener: lis}, &ClientOptions{
-				HeartbeatTimeout: n.options.HeartbeatTimeout,
-				WaitTimeout:      n.options.RetryTimeout,
-				RetryInterval:    n.options.RetryInterval,
-				PacketCodec:      options.Codec,
-				Crypto:           options.Crypto,
-				NeedLogin:        options.NeedLogin,
+				HeartbeatTimeout:  n.options.HeartbeatTimeout,
+				HeartbeatInterval: n.options.HeartbeatInterval,
+				WaitTimeout:       n.options.WaitTimeout,
+				RetryInterval:     n.options.RetryInterval,
+				PacketCodec:       options.Codec,
+				Crypto:            options.Crypto,
+				NeedLogin:         options.NeedLogin,
 			})
 			client.HandlerMgr = n.options.handlerMgr
 			if client.BeReady() {
@@ -153,12 +159,13 @@ func (n *Hub) ListenAndServeTcp(addr string, listenerCount int, opts ...HubServe
 	tcp := NewTcpServer(addr, options.ServerOpts...)
 	tcp.OnClientConnect = func(conn *TcpConn) {
 		client := newClient(conn, &ClientOptions{
-			HeartbeatTimeout: n.options.HeartbeatTimeout,
-			WaitTimeout:      n.options.RetryTimeout,
-			RetryInterval:    n.options.RetryInterval,
-			PacketCodec:      options.Codec,
-			Crypto:           options.Crypto,
-			NeedLogin:        options.NeedLogin,
+			HeartbeatTimeout:  n.options.HeartbeatTimeout,
+			HeartbeatInterval: n.options.HeartbeatInterval,
+			WaitTimeout:       n.options.WaitTimeout,
+			RetryInterval:     n.options.RetryInterval,
+			PacketCodec:       options.Codec,
+			Crypto:            options.Crypto,
+			NeedLogin:         options.NeedLogin,
 		})
 		client.HandlerMgr = options.handlerMgr
 		if client.BeReady() {
@@ -195,12 +202,13 @@ func (n *Hub) ListenAndServeWebsocket(addr string, opts ...HubServerOption) *Web
 	ws := NewWebsocketServer(addr, options.ServerOpts...)
 	ws.OnClientConnect = func(conn *WebsocketConn) {
 		client := newClient(conn, &ClientOptions{
-			HeartbeatTimeout: n.options.HeartbeatTimeout,
-			WaitTimeout:      n.options.RetryTimeout,
-			RetryInterval:    n.options.RetryInterval,
-			PacketCodec:      options.Codec,
-			Crypto:           options.Crypto,
-			NeedLogin:        options.NeedLogin,
+			HeartbeatTimeout:  n.options.HeartbeatTimeout,
+			HeartbeatInterval: n.options.HeartbeatInterval,
+			WaitTimeout:       n.options.WaitTimeout,
+			RetryInterval:     n.options.RetryInterval,
+			PacketCodec:       options.Codec,
+			Crypto:            options.Crypto,
+			NeedLogin:         options.NeedLogin,
 		})
 		client.HandlerMgr = options.handlerMgr
 		if client.BeReady() {
@@ -278,6 +286,14 @@ func (n *Hub) AddClient(new *Client) {
 			n.Group.RemoveClient(new.ClientId)
 		}
 	})
+}
+
+func (n *Hub) RegisterRequestHandler(method string, handler requestHandler) {
+	n.options.handlerMgr.RegisterRequestHandler(method, handler)
+}
+
+func (n *Hub) RegisterStreamHandler(method string, handler streamHandler) {
+	n.options.handlerMgr.RegisterStreamHandler(method, handler)
 }
 
 type SessionData struct {

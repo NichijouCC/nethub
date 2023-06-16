@@ -54,7 +54,7 @@ func main() {
 
 	hub := nethub.New(&nethub.HubOptions{
 		HeartbeatTimeout: 15,
-		RetryTimeout:     10,
+		WaitTimeout:      10,
 		RetryInterval:    10,
 	})
 

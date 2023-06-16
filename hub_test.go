@@ -10,7 +10,7 @@ import (
 func TestHub_ListenAndServe(t *testing.T) {
 	hub := New(&HubOptions{
 		HeartbeatTimeout: 10,
-		RetryTimeout:     10,
+		WaitTimeout:      10,
 		RetryInterval:    3,
 	})
 	hub.ListenAndServeUdp(":1234", 2)
@@ -22,12 +22,12 @@ func TestHub_ListenAndServe(t *testing.T) {
 func TestHub_RegisterRequestHandler(t *testing.T) {
 	hub := New(&HubOptions{
 		HeartbeatTimeout: 10,
-		RetryTimeout:     10,
+		WaitTimeout:      10,
 		RetryInterval:    3,
 	})
 	hub.ListenAndServeTcp(":1235", 2)
-	hub.RegisterRequestHandler("add", func(req *RequestPacket, from *Client) (interface{}, error) {
-		return 2, nil
+	hub.RegisterRequestHandler("add", func(req *RequestPacket, from *Client) ([]byte, error) {
+		return []byte(string(2)), nil
 	})
 	select {}
 }
@@ -35,7 +35,7 @@ func TestHub_RegisterRequestHandler(t *testing.T) {
 func TestHub_RegisterStreamHandler(t *testing.T) {
 	hub := New(&HubOptions{
 		HeartbeatTimeout: 10,
-		RetryTimeout:     10,
+		WaitTimeout:      10,
 		RetryInterval:    3,
 	})
 	hub.ListenAndServeTcp(":1235", 2)
@@ -76,7 +76,7 @@ func TestHub_RegisterStreamHandler(t *testing.T) {
 func TestHub_subscribe(t *testing.T) {
 	hub := New(&HubOptions{
 		HeartbeatTimeout: 10,
-		RetryTimeout:     10,
+		WaitTimeout:      10,
 		RetryInterval:    3,
 	})
 	hub.ListenAndServeTcp(":1235", 2)

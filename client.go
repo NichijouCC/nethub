@@ -17,6 +17,9 @@ var Enqueue int64 = 0
 var EnConsume int64 = 0
 
 type ClientOptions struct {
+	//定时发送心跳包,-1 不发送心跳包
+	HeartbeatInterval float64
+	//等待心跳包超时, -1 不校验超时
 	HeartbeatTimeout float64
 	//等待Response
 	WaitTimeout float64
@@ -157,21 +160,21 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 			case <-ticker.C:
 				if cli.BeConnected() {
 					//如果无发送包,定时发送心跳包
-					if cli.lastTxTime.Load() == nil || time.Now().Sub(cli.lastTxTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000*0.3) {
+					if cli.options.HeartbeatInterval != 0 && (cli.lastTxTime.Load() == nil || time.Now().Sub(cli.lastTxTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatInterval*1000)) {
 						var heartbeat HeartbeatPacket = ""
 						cli.SendPacket(&heartbeat)
 					}
-				}
 
-				if cli.beClient.Load() && cli.BeConnected() {
-					if time.Now().Sub(cli.lastRxTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000) {
-						logger.Error(fmt.Sprintf("[%v]超时无数据,断开连接.", cli.ClientId))
-						cli.conn.Close()
-					}
-				} else {
-					if time.Now().Sub(cli.lastRxTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000) {
-						logger.Error(fmt.Sprintf("[%v]超时无数据,断开连接.", cli.ClientId))
-						cli.Dispose()
+					if cli.beClient.Load() {
+						if cli.options.HeartbeatTimeout != 0 && time.Now().Sub(cli.lastRxTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000) {
+							logger.Error(fmt.Sprintf("[%v]超时无数据,断开连接.", cli.ClientId))
+							cli.conn.Close()
+						}
+					} else { //超时无心跳,释放client
+						if cli.options.HeartbeatTimeout != 0 && time.Now().Sub(cli.lastRxTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000) {
+							logger.Error(fmt.Sprintf("[%v]超时无数据,断开连接.", cli.ClientId))
+							cli.Dispose()
+						}
 					}
 				}
 			}
@@ -626,13 +629,13 @@ func (m *Client) StreamRequest(method string, params []byte, execute func(stream
 
 func (m *Client) SendMessage(message []byte) error {
 	m.lastTxTime.Store(time.Now())
-	logger.Info(fmt.Sprintf("[%v]Send:%v", m.ClientId, string(message)))
+	//logger.Info(fmt.Sprintf("[%v]Send:%v", m.ClientId, string(message)))
 	return m.conn.SendMessage(message)
 }
 
 func (m *Client) SendMessageDirect(message []byte) error {
 	m.lastTxTime.Store(time.Now())
-	logger.Info(fmt.Sprintf("[%v]Send:%v", m.ClientId, string(message)))
+	//logger.Info(fmt.Sprintf("[%v]Send:%v", m.ClientId, string(message)))
 	return m.conn.SendMessageDirect(message)
 }
 
