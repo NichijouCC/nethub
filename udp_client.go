@@ -133,6 +133,10 @@ func (n *UdpClient) RemoteAddr() net.Addr {
 	return n.Conn.RemoteAddr()
 }
 
+func (n *UdpClient) Type() string {
+	return "udp"
+}
+
 func (n *UdpClient) ListenToOnDisconnect(f func(data interface{})) {
 	n.OnDisconnect.AddEventListener(f)
 }
