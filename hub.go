@@ -51,7 +51,9 @@ func New(options *HubOptions) *Hub {
 		logger.Info(fmt.Sprintf("[%v]设置clientId为[%v]", client.ClientId, params.ClientId))
 		client.ClientId = params.ClientId
 		client.GroupId = params.BucketId
-		return []byte("成功"), nil
+
+		result, _ := json.Marshal("成功")
+		return result, nil
 	})
 
 	r.options.handlerMgr.RegisterRequestHandler(EXCHANGE_SECRET, func(req *RequestPacket, client *Client) ([]byte, error) {
@@ -67,7 +69,9 @@ func New(options *HubOptions) *Hub {
 		if err != nil {
 			return nil, fmt.Errorf("交换密钥失败,secret出错:%v", err.Error())
 		}
-		return []byte(pubkey), nil
+
+		result, _ := json.Marshal(pubkey)
+		return result, nil
 	})
 
 	return r
