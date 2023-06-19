@@ -29,10 +29,10 @@ type INetPacket interface {
 }
 
 type RequestPacket struct {
-	Id       string `json:"id,omitempty"`
-	Method   string `json:"method"`
-	Params   []byte `json:"params"`
-	ClientId string `json:"client_id,omitempty"`
+	Id       string          `json:"id,omitempty"`
+	Method   string          `json:"method"`
+	Params   json.RawMessage `json:"params"`
+	ClientId string          `json:"client_id,omitempty"`
 }
 
 func (r *RequestPacket) TypeCode() PacketTypeCode {
@@ -44,10 +44,10 @@ func (r *RequestPacket) GetId() string {
 }
 
 type PublishPacket struct {
-	Id       string `json:"id,omitempty"`
-	Topic    string `json:"topic"`
-	Params   []byte `json:"params"`
-	ClientId string `json:"client_id,omitempty"`
+	Id       string          `json:"id,omitempty"`
+	Topic    string          `json:"topic"`
+	Params   json.RawMessage `json:"params"`
+	ClientId string          `json:"client_id,omitempty"`
 }
 
 func (r *PublishPacket) TypeCode() PacketTypeCode {
@@ -93,9 +93,9 @@ func (r *BroadcastPacket) GetId() string {
 }
 
 type ResponsePacket struct {
-	Id     string `json:"id,omitempty"`
-	Result []byte `json:"result,omitempty"`
-	Error  string `json:"error,omitempty"`
+	Id     string          `json:"id,omitempty"`
+	Result json.RawMessage `json:"result,omitempty"`
+	Error  string          `json:"error,omitempty"`
 }
 
 func (r *ResponsePacket) TypeCode() PacketTypeCode {

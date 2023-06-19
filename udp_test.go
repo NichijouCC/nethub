@@ -58,7 +58,7 @@ func TestBroadcastToAround(t *testing.T) {
 
 			dataBytes, _ := json.Marshal(data)
 			broadcastRpc := RequestPacket{Method: "broadcast_to_around", Params: dataBytes}
-			packet := defaultCodec.Marshal(&broadcastRpc)
+			packet := defaultCodec.Marshal(&broadcastRpc, nil)
 			rts = append(rts, packet)
 		}
 	}
@@ -93,7 +93,12 @@ func TestRtMessage(t *testing.T) {
 		//Session, err := net.Dial("udp", "192.168.9.86:1234")
 		//conn, err := net.Dial("udp", "106.14.223.60:1234")
 		var projectId int64 = 53010217439105
-		client := DialHubUdp("139.196.75.44:1234", LoginParams{ClientId: "T_001", BucketId: &projectId})
+		client := DialHubUdp("139.196.75.44:1234", LoginParams{ClientId: "T_001", BucketId: &projectId}, &ClientOptions{
+			HeartbeatInterval: 5,
+			HeartbeatTimeout:  10,
+			WaitTimeout:       10,
+			RetryInterval:     5,
+		})
 		//client := DialHubUdp("127.0.0.1:1234", LoginParams{ClientId: "T_001", BucketId: &projectId})
 		clients = append(clients, client)
 		//client.SendPacket(&SubscribePacket{Topic: "+/rt_message"})

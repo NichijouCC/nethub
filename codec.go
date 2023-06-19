@@ -16,7 +16,7 @@ type ICodec interface {
 
 var defaultCodec = NewSimpleCodec()
 
-// <type_code>@<content_data_string>
+// <type_code>@<content_data_string(json)>
 type SimpleCodec struct {
 	contentDecoder map[PacketTypeCode]func(packet []byte) (INetPacket, error)
 }
