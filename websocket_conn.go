@@ -57,6 +57,10 @@ func (t *WebsocketConn) RemoteAddr() net.Addr {
 	return t.Conn.RemoteAddr()
 }
 
+func (t *WebsocketConn) Type() string {
+	return "websocket"
+}
+
 // websocket缓冲size大小
 var WebsocketTxQueueLen = 100
 

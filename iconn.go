@@ -14,5 +14,7 @@ type IConn interface {
 
 	RemoteAddr() net.Addr
 
+	Type() string
+
 	ListenToOnMessage(func(data interface{}))
 }

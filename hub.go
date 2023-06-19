@@ -127,7 +127,7 @@ func (n *Hub) ListenAndServeUdp(addr string, listenerCount int, opts ...HubServe
 	var addrToClient sync.Map
 	udp.OnReceiveMessage = func(rawData []byte, addr net.Addr, lis *udpListener) {
 		var client *Client
-		if value, loaded := addrToClient.Load(addr); loaded {
+		if value, loaded := addrToClient.Load(addr.String()); loaded {
 			client = value.(*Client)
 		} else {
 			client = newClient(&fakeUdpConn{Addr: addr, listener: lis}, &ClientOptions{
@@ -152,7 +152,7 @@ func (n *Hub) ListenAndServeUdp(addr string, listenerCount int, opts ...HubServe
 			client.OnDispose.AddEventListener(func(data interface{}) {
 				addrToClient.Delete(addr)
 			})
-			value, _ = addrToClient.LoadOrStore(addr, client)
+			value, _ = addrToClient.LoadOrStore(addr.String(), client)
 			client = value.(*Client)
 		}
 		client.receiveMessage(rawData)
@@ -308,7 +308,7 @@ func (n *Hub) AddClient(new *Client) {
 			})
 		}
 	} else {
-		logger.Info("hub新增加客户端", zap.String("clientId", new.ClientId))
+		logger.Info("hub新增加客户端", zap.String("clientId", new.ClientId), zap.String("协议", new.conn.Type()), zap.String("addr", new.conn.RemoteAddr().String()))
 		n.clients.Store(new.ClientId, new)
 		if new.GroupId != 0 {
 			group := n.FindOrCreateGroup(new.GroupId)
@@ -316,7 +316,6 @@ func (n *Hub) AddClient(new *Client) {
 		} else {
 			n.Group.AddClient(new)
 		}
-
 		new.OnDispose.AddEventListener(func(data interface{}) {
 			logger.Info("hub移除客户端", zap.String("clientId", new.ClientId))
 			n.clients.Delete(new.ClientId)

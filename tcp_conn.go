@@ -134,6 +134,10 @@ func (t *TcpConn) SendMessageDirect(msg []byte) error {
 	return packetWrite(t.Conn, msg)
 }
 
+func (t *TcpConn) Type() string {
+	return "tcp"
+}
+
 func (t *TcpConn) Close() {
 	t.closeMu.Lock()
 	defer t.closeMu.Unlock()

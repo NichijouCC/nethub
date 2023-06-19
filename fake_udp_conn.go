@@ -35,6 +35,10 @@ func (n *fakeUdpConn) RemoteAddr() net.Addr {
 	return n.Addr
 }
 
+func (n *fakeUdpConn) Type() string {
+	return "udp"
+}
+
 func (n *fakeUdpConn) ListenToOnMessage(f func(data interface{})) {
 
 }
