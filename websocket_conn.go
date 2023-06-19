@@ -29,6 +29,7 @@ type WebsocketConn struct {
 	sync.RWMutex
 	isClosed  bool
 	LoginData []byte
+	UrlParams map[string]string
 
 	PongWait     time.Duration
 	PingInterval time.Duration

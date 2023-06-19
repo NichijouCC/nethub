@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"go.uber.org/zap"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -50,7 +51,9 @@ func New(options *HubOptions) *Hub {
 		}
 		logger.Info(fmt.Sprintf("[%v]设置clientId为[%v]", client.ClientId, params.ClientId))
 		client.ClientId = params.ClientId
-		client.GroupId = params.BucketId
+		if params.BucketId != nil {
+			client.GroupId = *params.BucketId
+		}
 
 		result, _ := json.Marshal("成功")
 		return result, nil
@@ -134,6 +137,7 @@ func (n *Hub) ListenAndServeUdp(addr string, listenerCount int, opts ...HubServe
 				Crypto:            options.Crypto,
 				NeedLogin:         options.NeedLogin,
 			})
+			//client.hub = n
 			client.HandlerMgr = n.options.handlerMgr
 			if client.BeReady() {
 				n.AddClient(client)
@@ -176,6 +180,7 @@ func (n *Hub) ListenAndServeTcp(addr string, listenerCount int, opts ...HubServe
 			Crypto:            options.Crypto,
 			NeedLogin:         options.NeedLogin,
 		})
+		//client.hub = n
 		client.HandlerMgr = options.handlerMgr
 		if client.BeReady() {
 			n.AddClient(client)
@@ -210,7 +215,8 @@ func (n *Hub) ListenAndServeWebsocket(addr string, opts ...HubServerOption) *Web
 	//websocket Server
 	ws := NewWebsocketServer(addr, options.ServerOpts...)
 	ws.OnClientConnect = func(conn *WebsocketConn) {
-		client := newClient(conn, &ClientOptions{
+		cliOpts := &ClientOptions{
+			ClientId:          conn.UrlParams["client_id"],
 			HeartbeatTimeout:  n.options.HeartbeatTimeout,
 			HeartbeatInterval: n.options.HeartbeatInterval,
 			WaitTimeout:       n.options.WaitTimeout,
@@ -218,7 +224,15 @@ func (n *Hub) ListenAndServeWebsocket(addr string, opts ...HubServerOption) *Web
 			PacketCodec:       options.Codec,
 			Crypto:            options.Crypto,
 			NeedLogin:         options.NeedLogin,
-		})
+		}
+		cliOpts.ClientId = conn.UrlParams["client_id"]
+		groupIdStr := conn.UrlParams["bucket_id"]
+		if groupIdStr != "" {
+			groupId, _ := strconv.ParseInt(groupIdStr, 10, 64)
+			cliOpts.GroupId = groupId
+		}
+		client := newClient(conn, cliOpts)
+		//client.hub = n
 		client.HandlerMgr = options.handlerMgr
 		if client.BeReady() {
 			n.AddClient(client)
@@ -272,29 +286,38 @@ func (n *Hub) FindClient(id string) (*Client, bool) {
 }
 
 func (n *Hub) AddClient(new *Client) {
-	if client, loaded := n.clients.LoadAndDelete(new.ClientId); loaded {
-		logger.Error(fmt.Sprintf("clientId【%v】已连接,关闭旧连接", new.ClientId))
-		client.(*Client).Dispose()
-	}
-	logger.Info("hub新增加客户端", zap.String("clientId", new.ClientId))
-	n.clients.Store(new.ClientId, new)
-	if new.GroupId != nil {
-		group := n.FindOrCreateGroup(*new.GroupId)
-		group.AddClient(new)
-	} else {
-		n.Group.AddClient(new)
-	}
+	if value, loaded := n.clients.Load(new.ClientId); loaded {
+		if value.(*Client) != new {
+			logger.Error(fmt.Sprintf("clientId【%v】已连接,关闭旧连接[%v]", new.ClientId, new.conn.RemoteAddr()))
+			value.(*Client).Dispose()
+			n.clients.Store(new.ClientId, new)
 
-	new.OnDispose.AddEventListener(func(data interface{}) {
-		logger.Info("hub移除客户端", zap.String("clientId", new.ClientId))
-		n.clients.Delete(new.ClientId)
-		if new.GroupId != nil {
-			group := n.FindOrCreateGroup(*new.GroupId)
-			group.RemoveClient(new.ClientId)
-		} else {
-			n.Group.RemoveClient(new.ClientId)
+			if new.GroupId != 0 {
+				group := n.FindOrCreateGroup(new.GroupId)
+				group.AddClient(new)
+			} else {
+				n.Group.AddClient(new)
+			}
+			new.OnDispose.AddEventListener(func(data interface{}) {
+				logger.Info("hub移除客户端", zap.String("clientId", new.ClientId))
+				n.clients.Delete(new.ClientId)
+			})
 		}
-	})
+	} else {
+		logger.Info("hub新增加客户端", zap.String("clientId", new.ClientId))
+		n.clients.Store(new.ClientId, new)
+		if new.GroupId != 0 {
+			group := n.FindOrCreateGroup(new.GroupId)
+			group.AddClient(new)
+		} else {
+			n.Group.AddClient(new)
+		}
+
+		new.OnDispose.AddEventListener(func(data interface{}) {
+			logger.Info("hub移除客户端", zap.String("clientId", new.ClientId))
+			n.clients.Delete(new.ClientId)
+		})
+	}
 }
 
 func (n *Hub) RegisterRequestHandler(method string, handler requestHandler) {

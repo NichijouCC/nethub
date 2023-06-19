@@ -64,12 +64,19 @@ func (m *Group) FindClient(id string) (*Client, bool) {
 }
 
 func (m *Group) AddClient(client *Client) {
-	logger.Info(fmt.Sprintf("GROUP[%v]新增加客户端", m.id), zap.String("clientId", client.ClientId))
-	m.clients.Store(client.ClientId, client)
-	client.Group = m
+	currentGroup := client.Group.Load()
+	if currentGroup != m {
+		if currentGroup != nil {
+			currentGroup.RemoveClient(client)
+		}
+		logger.Info(fmt.Sprintf("GROUP[%v]新增加客户端", m.id), zap.String("clientId", client.ClientId))
+		m.clients.Store(client, struct{}{})
+		client.Group.Store(m)
+	}
 }
 
-func (m *Group) RemoveClient(clientId string) {
-	logger.Info(fmt.Sprintf("GROUP[%v]移除客户端", m.id), zap.String("clientId", clientId))
-	m.clients.Delete(clientId)
+func (m *Group) RemoveClient(client *Client) {
+	logger.Info(fmt.Sprintf("GROUP[%v]移除客户端", m.id), zap.String("clientId", client.ClientId))
+	m.clients.Delete(client)
+	client.Group.Store(nil)
 }

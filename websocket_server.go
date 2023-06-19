@@ -65,12 +65,12 @@ func (ws *WebsocketServer) ListenAndServe() error {
 
 func (ws *WebsocketServer) accept(w http.ResponseWriter, r *http.Request) {
 	var loginData []byte
+	paramsMap := r.URL.Query()
+	params := map[string]string{}
+	for s, strings := range paramsMap {
+		params[s] = strings[0]
+	}
 	if ws.Opts.Login != nil {
-		paramsMap := r.URL.Query()
-		params := map[string]string{}
-		for s, strings := range paramsMap {
-			params[s] = strings[0]
-		}
 		loginData, _ = json.Marshal(params)
 		err := ws.Opts.Login.CheckFunc(loginData, nil)
 		if err != nil {
@@ -89,6 +89,7 @@ func (ws *WebsocketServer) accept(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	newConn := NewWebsocketConn(conn)
+	newConn.UrlParams = params
 	newConn.LoginData = loginData
 	newConn.PingInterval = ws.PingInterval
 	newConn.PongWait = ws.PongWait

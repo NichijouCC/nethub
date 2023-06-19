@@ -17,6 +17,8 @@ var Enqueue int64 = 0
 var EnConsume int64 = 0
 
 type ClientOptions struct {
+	ClientId string
+	GroupId  int64
 	//定时发送心跳包,-1 不发送心跳包
 	HeartbeatInterval float64
 	//等待心跳包超时, -1 不校验超时
@@ -50,10 +52,11 @@ type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	//是否是客户端
-	beClient          atomic.Bool
-	ClientId          string
-	Group             *Group
-	GroupId           *int64
+	beClient atomic.Bool
+	ClientId string
+	//hub               *Hub
+	Group             atomic.Pointer[Group]
+	GroupId           int64
 	conn              IConn
 	OnReady           *EventTarget
 	OnDispose         *EventTarget
@@ -97,12 +100,15 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 	if opts.PacketCodec == nil {
 		opts.PacketCodec = defaultCodec
 	}
+	if opts.ClientId == "" {
+		opts.ClientId = uuid.NewString()
+	}
 	cli := &Client{
 		ctx:           ctx,
 		cancel:        cancel,
 		beClient:      atomic.Bool{},
 		state:         atomic.Value{},
-		ClientId:      uuid.NewString(),
+		ClientId:      opts.ClientId,
 		conn:          conn,
 		OnReady:       newEventTarget(),
 		OnDispose:     newEventTarget(),
@@ -112,6 +118,7 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 		HandlerMgr:    &HandlerMgr{},
 		PubSub:        newPubSub(ctx, ClientPubChLen),
 		options:       opts,
+		GroupId:       opts.GroupId,
 	}
 	cli.state.Store(DISCONNECT)
 	cli.beClient.Store(false)
@@ -334,9 +341,10 @@ func (m *Client) onReceivePublish(pkt *Packet) {
 	if request.Id != "" {
 		m.SendPacket(&AckPacket{Id: request.Id})
 	}
-	if m.Group != nil {
+	currentGroup := m.Group.Load()
+	if currentGroup != nil {
 		request.Topic = fmt.Sprintf("%v/%v", m.ClientId, request.Topic)
-		m.Group.PubTopic(request, m)
+		currentGroup.PubTopic(request, m)
 	} else {
 		m.PubTopic(request, m)
 	}
@@ -383,8 +391,9 @@ func (m *Client) onReceiveBroadcast(pkt *Packet) {
 		m.SendPacket(&AckPacket{Id: request.Id})
 	}
 	request.ClientId = m.ClientId
-	if m.Group != nil {
-		m.Group.Broadcast(request)
+	currentGroup := m.Group.Load()
+	if currentGroup != nil {
+		currentGroup.Broadcast(request)
 	} else if m.OnBroadcast != nil {
 		m.OnBroadcast(request)
 	}
@@ -672,7 +681,9 @@ func (m *Client) Login(params *LoginParams) error {
 	}
 	logger.Info(fmt.Sprintf("[%v]设置clientId为[%v]", m.ClientId, params.ClientId))
 	m.ClientId = params.ClientId
-	m.GroupId = params.BucketId
+	if params.BucketId != nil {
+		m.GroupId = *params.BucketId
+	}
 	data, _ := json.Marshal(params)
 	_, err := m.Request("login", data)
 	if err == nil {
@@ -691,6 +702,10 @@ func (m *Client) Dispose() {
 	m.ClearAllSubTopics()
 	logger.Info("客户端释放", zap.String("clientId", m.ClientId), zap.String("from", m.conn.RemoteAddr().String()))
 	m.conn.Close()
+	currentGroup := m.Group.Load()
+	if currentGroup != nil {
+		currentGroup.RemoveClient(m)
+	}
 	go m.OnDispose.RiseEvent(nil)
 }
 
