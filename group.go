@@ -50,7 +50,7 @@ func (m *Group) PubTopic(pkt *PublishPacket, from *Client) {
 	}
 	m.PubSub.PubTopic(pkt, from)
 	m.clients.Range(func(key, value any) bool {
-		value.(*Client).PubTopic(pkt, from)
+		key.(*Client).PubTopic(pkt, from)
 		return true
 	})
 }
