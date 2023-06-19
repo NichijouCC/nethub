@@ -93,7 +93,6 @@ func (t *WebsocketConn) StartWrite() {
 				if err := t.SendMessageDirect(data); err != nil {
 					log.Println(fmt.Sprintf(`websocket write error:%v`, err.Error()))
 					t.OnError.RiseEvent(err)
-					t.Conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4001, err.Error()), time.Now().Add(time.Second*3))
 					return
 				}
 			}
@@ -119,7 +118,6 @@ func (t *WebsocketConn) StartRead() {
 						log.Printf("websocket server read error: %v", err)
 						t.OnError.RiseEvent(err)
 					}
-					t.Conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4001, err.Error()), time.Now().Add(time.Second*3))
 					return
 				}
 				t.OnMessage.RiseEvent(msg)
@@ -174,6 +172,7 @@ func (t *WebsocketConn) Close() {
 	}
 	t.isClosed = true
 	t.cancel()
+	t.Conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(4001, "close"), time.Now().Add(time.Second*3))
 	t.Conn.Close()
 	go t.OnDisconnect.RiseEvent(nil)
 }

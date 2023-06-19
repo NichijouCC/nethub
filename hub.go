@@ -1,6 +1,8 @@
 package nethub
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"go.uber.org/zap"
 	"net"
@@ -40,33 +42,33 @@ func New(options *HubOptions) *Hub {
 		Group:   newGroup(-1, nil),
 		options: options,
 	}
-	//r.options.handlerMgr.RegisterRequestHandler("login", func(req *RequestPacket, client *Client) ([]byte, error) {
-	//	var params LoginParams
-	//	err := json.Unmarshal(req.Params, &params)
-	//	if err != nil {
-	//		return "失败", err
-	//	}
-	//	logger.Info(fmt.Sprintf("[%v]设置clientId为[%v]", client.ClientId, params.ClientId))
-	//	client.ClientId = params.ClientId
-	//	client.GroupId = params.BucketId
-	//	return "成功", nil
-	//})
-	//
-	//r.options.handlerMgr.RegisterRequestHandler(EXCHANGE_SECRET, func(req *RequestPacket, client *Client) ([]byte, error) {
-	//	var params ExchangeSecretParams
-	//	err := json.Unmarshal(req.Params, &params)
-	//	if err != nil {
-	//		return nil, fmt.Errorf("params unmarshal err:%v", err.Error())
-	//	}
-	//	if client.options.Crypto == nil {
-	//		return nil, errors.New("未启用加密通信")
-	//	}
-	//	pubkey, err := client.options.Crypto.ComputeSecret(params.PubKey)
-	//	if err != nil {
-	//		return nil, fmt.Errorf("交换密钥失败,secret出错:%v", err.Error())
-	//	}
-	//	return pubkey, nil
-	//})
+	r.options.handlerMgr.RegisterRequestHandler("login", func(req *RequestPacket, client *Client) ([]byte, error) {
+		var params LoginParams
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return []byte("失败"), err
+		}
+		logger.Info(fmt.Sprintf("[%v]设置clientId为[%v]", client.ClientId, params.ClientId))
+		client.ClientId = params.ClientId
+		client.GroupId = params.BucketId
+		return []byte("成功"), nil
+	})
+
+	r.options.handlerMgr.RegisterRequestHandler(EXCHANGE_SECRET, func(req *RequestPacket, client *Client) ([]byte, error) {
+		var params ExchangeSecretParams
+		err := json.Unmarshal(req.Params, &params)
+		if err != nil {
+			return nil, fmt.Errorf("params unmarshal err:%v", err.Error())
+		}
+		if client.options.Crypto == nil {
+			return nil, errors.New("未启用加密通信")
+		}
+		pubkey, err := client.options.Crypto.ComputeSecret(params.PubKey)
+		if err != nil {
+			return nil, fmt.Errorf("交换密钥失败,secret出错:%v", err.Error())
+		}
+		return []byte(pubkey), nil
+	})
 
 	return r
 }
@@ -136,6 +138,9 @@ func (n *Hub) ListenAndServeUdp(addr string, listenerCount int, opts ...HubServe
 					n.AddClient(client)
 				})
 			}
+			client.OnDispose.AddEventListener(func(data interface{}) {
+				addrToClient.Delete(addr)
+			})
 			value, _ = addrToClient.LoadOrStore(addr, client)
 			client = value.(*Client)
 		}

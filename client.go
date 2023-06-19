@@ -50,20 +50,19 @@ type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	//是否是客户端
-	beClient           atomic.Bool
-	ClientId           string
-	Group              *Group
-	GroupId            *int64
-	conn               IConn
-	OnReady            *EventTarget
-	OnDispose          *EventTarget
-	OnHeartbeatTimeout *EventTarget
-	OnPingHandler      func(pkt *PingPacket)
-	OnPongHandler      func(pkt *PongPacket)
-	beDisposed         atomic.Bool
-	state              atomic.Value
-	beExchangedSecret  atomic.Bool
-	beLogin            atomic.Bool
+	beClient          atomic.Bool
+	ClientId          string
+	Group             *Group
+	GroupId           *int64
+	conn              IConn
+	OnReady           *EventTarget
+	OnDispose         *EventTarget
+	OnPingHandler     func(pkt *PingPacket)
+	OnPongHandler     func(pkt *PongPacket)
+	beDisposed        atomic.Bool
+	state             atomic.Value
+	beExchangedSecret atomic.Bool
+	beLogin           atomic.Bool
 
 	rxQueue       chan *Packet
 	lastRxTime    atomic.Value
@@ -694,7 +693,7 @@ func (m *Client) Dispose() {
 	m.ClearAllSubTopics()
 	logger.Info("客户端释放", zap.String("clientId", m.ClientId), zap.String("from", m.conn.RemoteAddr().String()))
 	m.conn.Close()
-	m.OnDispose.RiseEvent(nil)
+	go m.OnDispose.RiseEvent(nil)
 }
 
 type flyPacket struct {
