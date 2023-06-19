@@ -122,7 +122,7 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 	cli.packetHandler[RESPONSE_PACKET] = cli.onReceiveResponse
 	cli.packetHandler[PUBLISH_PACKET] = cli.onReceivePublish
 	cli.packetHandler[SUBSCRIBE_PACKET] = cli.onReceiveSubscribe
-	cli.packetHandler[UNSUBSCRIBE_PACKET] = cli.onReceiveSubscribe
+	cli.packetHandler[UNSUBSCRIBE_PACKET] = cli.onReceiveUnsubscribe
 	cli.packetHandler[BROADCAST_PACKET] = cli.onReceiveBroadcast
 	cli.packetHandler[STREAM_REQUEST_PACKET] = cli.onReceiveStreamRequest
 	cli.packetHandler[STREAM_RESPONSE_PACKET] = cli.onReceiveStreamResponse
@@ -207,12 +207,12 @@ func (m *Client) receiveMessage(rawData []byte) {
 		switch payload.TypeCode() {
 		case REQUEST_PACKET:
 			if payload.(*RequestPacket).Method != EXCHANGE_SECRET {
-				logger.Warn("client还未交互密钥,丢弃消息！", zap.Any("packet", pkt))
+				logger.Warn("client还未交互密钥,丢弃消息！", zap.Any("packet", pkt.PacketContent))
 				return
 			}
 		case ACK_PACKET, RESPONSE_PACKET:
 		default:
-			logger.Warn("client还未交互密钥,丢弃消息！", zap.Any("packet", pkt))
+			logger.Warn("client还未交互密钥,丢弃消息！", zap.Any("packet", pkt.PacketContent))
 			return
 		}
 	}
@@ -220,12 +220,12 @@ func (m *Client) receiveMessage(rawData []byte) {
 		switch payload.TypeCode() {
 		case REQUEST_PACKET:
 			if payload.(*RequestPacket).Method != EXCHANGE_SECRET && payload.(*RequestPacket).Method != LOGIN {
-				logger.Warn("client还未登录,丢弃消息！", zap.Any("packet", pkt))
+				logger.Warn("client还未登录,丢弃消息！", zap.Any("packet", pkt.PacketContent))
 				return
 			}
 		case ACK_PACKET, RESPONSE_PACKET:
 		default:
-			logger.Warn("client还未登录,丢弃消息！", zap.Any("packet", pkt))
+			logger.Warn("client还未登录,丢弃消息！", zap.Any("packet", pkt.PacketContent))
 			return
 		}
 	}
