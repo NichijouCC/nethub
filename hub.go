@@ -141,11 +141,11 @@ func (n *Hub) ListenAndServeUdp(addr string, listenerCount int, opts ...HubServe
 			client.HandlerMgr = n.options.handlerMgr
 			if client.BeReady() {
 				n.AddClient(client)
-			} else {
-				client.OnReady.AddEventListener(func(data interface{}) {
-					n.AddClient(client)
-				})
 			}
+			client.OnReady.AddEventListener(func(data interface{}) {
+				n.AddClient(client)
+			})
+
 			client.OnDispose.AddEventListener(func(data interface{}) {
 				addrToClient.Delete(addr)
 			})
@@ -184,11 +184,10 @@ func (n *Hub) ListenAndServeTcp(addr string, listenerCount int, opts ...HubServe
 		client.HandlerMgr = options.handlerMgr
 		if client.BeReady() {
 			n.AddClient(client)
-		} else {
-			client.OnReady.AddEventListener(func(data interface{}) {
-				n.AddClient(client)
-			})
 		}
+		client.OnReady.AddEventListener(func(data interface{}) {
+			n.AddClient(client)
+		})
 
 		conn.ListenToOnMessage(func(data interface{}) {
 			client.receiveMessage(data.([]byte))
@@ -236,11 +235,10 @@ func (n *Hub) ListenAndServeWebsocket(addr string, opts ...HubServerOption) *Web
 		client.HandlerMgr = options.handlerMgr
 		if client.BeReady() {
 			n.AddClient(client)
-		} else {
-			client.OnReady.AddEventListener(func(data interface{}) {
-				n.AddClient(client)
-			})
 		}
+		client.OnReady.AddEventListener(func(data interface{}) {
+			n.AddClient(client)
+		})
 
 		conn.ListenToOnMessage(func(data interface{}) {
 			client.receiveMessage(data.([]byte))
