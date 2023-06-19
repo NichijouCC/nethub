@@ -276,25 +276,23 @@ func (m *Client) onReceiveRequest(pkt *Packet) {
 						resp.Error = err.Error()
 					} else {
 						resp.Result = result
+
+						//修改登录状态/交互密钥状态,不需要等设备端回复
+						switch request.Method {
+						case EXCHANGE_SECRET:
+							m.beExchangedSecret.Store(true)
+							if !m.options.NeedLogin {
+								m.OnReady.RiseEvent(nil)
+							}
+						case LOGIN:
+							m.beLogin.Store(true)
+							m.OnReady.RiseEvent(nil)
+						}
 					}
 				}
 				err := m.SendPacketWithRetry(resp)
 				if err != nil {
 					logger.Error("发送response出错", zap.String("clientId", m.ClientId), zap.String("From", m.conn.RemoteAddr().String()), zap.Error(err))
-				}
-				switch request.Method {
-				case EXCHANGE_SECRET:
-					if resp.Error == "" && err == nil {
-						m.beExchangedSecret.Store(true)
-						if !m.options.NeedLogin {
-							m.OnReady.RiseEvent(nil)
-						}
-					}
-				case LOGIN:
-					if resp.Error == "" && err == nil {
-						m.beLogin.Store(true)
-						m.OnReady.RiseEvent(nil)
-					}
 				}
 
 			}()
