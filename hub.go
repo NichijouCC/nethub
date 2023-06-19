@@ -12,6 +12,8 @@ import (
 )
 
 type HubOptions struct {
+	//超时断线,默认10秒
+	DisconnectTimeout float64
 	//定时发送心跳包, 0 不发送心跳包
 	HeartbeatInterval float64
 	//等待心跳包超时, 0 不校验超时
@@ -129,6 +131,7 @@ func (n *Hub) ListenAndServeUdp(addr string, listenerCount int, opts ...HubServe
 			client = value.(*Client)
 		} else {
 			client = newClient(&fakeUdpConn{Addr: addr, listener: lis}, &ClientOptions{
+				DisconnectTimeout: n.options.DisconnectTimeout,
 				HeartbeatTimeout:  n.options.HeartbeatTimeout,
 				HeartbeatInterval: n.options.HeartbeatInterval,
 				WaitTimeout:       n.options.WaitTimeout,
@@ -172,6 +175,7 @@ func (n *Hub) ListenAndServeTcp(addr string, listenerCount int, opts ...HubServe
 	tcp := NewTcpServer(addr, options.ServerOpts...)
 	tcp.OnClientConnect = func(conn *TcpConn) {
 		client := newClient(conn, &ClientOptions{
+			DisconnectTimeout: n.options.DisconnectTimeout,
 			HeartbeatTimeout:  n.options.HeartbeatTimeout,
 			HeartbeatInterval: n.options.HeartbeatInterval,
 			WaitTimeout:       n.options.WaitTimeout,
@@ -194,6 +198,7 @@ func (n *Hub) ListenAndServeTcp(addr string, listenerCount int, opts ...HubServe
 		})
 		conn.ListenToOnDisconnect(func(i interface{}) {
 			client.ClearAllSubTopics()
+			client.disconnectTime = time.Now()
 		})
 	}
 	go tcp.ListenAndServe(listenerCount)
@@ -215,7 +220,7 @@ func (n *Hub) ListenAndServeWebsocket(addr string, opts ...HubServerOption) *Web
 	ws := NewWebsocketServer(addr, options.ServerOpts...)
 	ws.OnClientConnect = func(conn *WebsocketConn) {
 		cliOpts := &ClientOptions{
-			ClientId:          conn.UrlParams["client_id"],
+			DisconnectTimeout: n.options.DisconnectTimeout,
 			HeartbeatTimeout:  n.options.HeartbeatTimeout,
 			HeartbeatInterval: n.options.HeartbeatInterval,
 			WaitTimeout:       n.options.WaitTimeout,
@@ -245,6 +250,7 @@ func (n *Hub) ListenAndServeWebsocket(addr string, opts ...HubServerOption) *Web
 		})
 		conn.ListenToOnDisconnect(func(i interface{}) {
 			client.ClearAllSubTopics()
+			client.disconnectTime = time.Now()
 		})
 	}
 	go ws.ListenAndServe()

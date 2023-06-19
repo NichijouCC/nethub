@@ -9,13 +9,12 @@ import (
 
 func TestHub_ListenAndServe(t *testing.T) {
 	hub := New(&HubOptions{
-		HeartbeatTimeout: 10,
-		WaitTimeout:      10,
-		RetryInterval:    3,
+		WaitTimeout:   10,
+		RetryInterval: 3,
 	})
 	hub.ListenAndServeUdp(":1234", 2)
-	hub.ListenAndServeTcp(":1235", 2, WithCrypto(NewCrypto()), WithNeedLogin(true))
-	hub.ListenAndServeWebsocket(":1555", WithNeedLogin(true))
+	hub.ListenAndServeTcp(":1235", 2)
+	hub.ListenAndServeWebsocket(":1555")
 	select {}
 }
 
@@ -27,7 +26,8 @@ func TestHub_RegisterRequestHandler(t *testing.T) {
 	})
 	hub.ListenAndServeTcp(":1235", 2)
 	hub.RegisterRequestHandler("add", func(req *RequestPacket, from *Client) ([]byte, error) {
-		return []byte(string(2)), nil
+		data, _ := json.Marshal("2")
+		return data, nil
 	})
 	select {}
 }

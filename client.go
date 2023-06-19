@@ -19,9 +19,11 @@ var EnConsume int64 = 0
 type ClientOptions struct {
 	ClientId string
 	GroupId  int64
-	//定时发送心跳包,-1 不发送心跳包
+	//断线超时,默认10s
+	DisconnectTimeout float64
+	//定时发送心跳包,0 不发送心跳包
 	HeartbeatInterval float64
-	//等待心跳包超时, -1 不校验超时
+	//等待心跳包超时, 0 不校验超时
 	HeartbeatTimeout float64
 	//等待Response
 	WaitTimeout float64
@@ -67,10 +69,11 @@ type Client struct {
 	beExchangedSecret atomic.Bool
 	beLogin           atomic.Bool
 
-	rxQueue       chan *Packet
-	lastRxTime    atomic.Value
-	packetHandler map[PacketTypeCode]func(pkt *Packet)
-	lastTxTime    atomic.Value
+	rxQueue        chan *Packet
+	lastRxTime     atomic.Value
+	packetHandler  map[PacketTypeCode]func(pkt *Packet)
+	lastTxTime     atomic.Value
+	disconnectTime time.Time
 
 	*HandlerMgr
 	//正在处理的request,struct{}
@@ -102,6 +105,9 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 	}
 	if opts.ClientId == "" {
 		opts.ClientId = uuid.NewString()
+	}
+	if opts.DisconnectTimeout == 0 {
+		opts.DisconnectTimeout = 10
 	}
 	cli := &Client{
 		ctx:           ctx,
@@ -173,14 +179,19 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 
 					if cli.beClient.Load() {
 						if cli.options.HeartbeatTimeout != 0 && time.Now().Sub(cli.lastRxTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000) {
-							logger.Error(fmt.Sprintf("[%v]超时无数据,断开连接.", cli.ClientId))
+							logger.Warn(fmt.Sprintf("[%v]超时无数据,断开连接.", cli.ClientId))
 							cli.conn.Close()
 						}
 					} else { //超时无心跳,释放client
 						if cli.options.HeartbeatTimeout != 0 && time.Now().Sub(cli.lastRxTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000) {
-							logger.Error(fmt.Sprintf("[%v]超时无数据,断开连接.", cli.ClientId))
+							logger.Warn(fmt.Sprintf("[%v]超时无数据,断开连接.", cli.ClientId))
 							cli.Dispose()
 						}
+					}
+				} else {
+					if time.Now().Sub(cli.disconnectTime) > time.Millisecond*time.Duration(cli.options.DisconnectTimeout*1000) {
+						logger.Info(fmt.Sprintf("[%v]超时断开连接.", cli.ClientId))
+						cli.Dispose()
 					}
 				}
 			}
