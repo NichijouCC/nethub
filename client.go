@@ -65,7 +65,6 @@ type Client struct {
 	OnPingHandler     func(pkt *PingPacket)
 	OnPongHandler     func(pkt *PongPacket)
 	beDisposed        atomic.Bool
-	state             atomic.Value
 	beExchangedSecret atomic.Bool
 	beLogin           atomic.Bool
 
@@ -113,7 +112,6 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 		ctx:           ctx,
 		cancel:        cancel,
 		beClient:      atomic.Bool{},
-		state:         atomic.Value{},
 		ClientId:      opts.ClientId,
 		conn:          conn,
 		OnReady:       newEventTarget(),
@@ -126,7 +124,6 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 		options:       opts,
 		GroupId:       opts.GroupId,
 	}
-	cli.state.Store(DISCONNECT)
 	cli.beClient.Store(false)
 	cli.lastRxTime.Store(time.Now())
 	//包处理

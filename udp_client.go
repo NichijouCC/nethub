@@ -40,7 +40,7 @@ func newUdpClient() *UdpClient {
 	}
 }
 
-func (n *UdpClient) StartReadWrite(heartbeatTimeout float64) {
+func (n *UdpClient) StartReadWrite() {
 	go func() { //接收数据
 		defer n.Close()
 		buf := make([]byte, packetBufSize)
@@ -115,8 +115,8 @@ func (n *UdpClient) Close() {
 	}
 	n.isClosed = true
 	n.cancel()
-	n.OnDisconnect.RiseEvent(nil)
 	n.Conn.Close()
+	go n.OnDisconnect.RiseEvent(nil)
 }
 
 func (n *UdpClient) IsClosed() bool {
@@ -183,7 +183,7 @@ func DialHubUdp(addr string, params LoginParams, opts *ClientOptions) *Client {
 		conn.OnMessage.AddEventListener(func(data interface{}) {
 			client.receiveMessage(data.([]byte))
 		})
-		conn.StartReadWrite(5)
+		conn.StartReadWrite()
 		for {
 			err = client.Login(&params)
 			if err != nil {

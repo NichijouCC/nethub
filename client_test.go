@@ -99,7 +99,7 @@ func TestClient_Publish(t *testing.T) {
 	})
 	ticker := time.NewTicker(time.Second)
 	for range ticker.C {
-		if client.state.Load().(clientState) == LOGINED {
+		if client.beLogin.Load() {
 			client.Publish("rt_message", []byte(`{"timestamp": 1671610334.1461706, "network_latency": 100.0, "longitude": 101.75232644, "latitude": 26.63366599, "altitude": 1116.06578656}`))
 		}
 	}
