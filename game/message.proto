@@ -101,3 +101,5 @@ message LocalChatReq{
   int64 FromUserId=2;
   string FromUserName=3;
 }
+
+message Heartbeat{}

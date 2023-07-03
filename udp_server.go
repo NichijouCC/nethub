@@ -78,6 +78,7 @@ func newUdpListener(socket net.PacketConn, onMessage func(data []byte, addr net.
 			buf = buf[nBytes:]
 			atomic.AddUint64(&UdpReadPkts, 1)
 			atomic.AddUint64(&UdpReadByte, uint64(nBytes))
+			//log.Println("udp read", len(msg), msg)
 			onMessage(msg, addr, lis)
 		}
 	}()

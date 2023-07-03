@@ -23,4 +23,5 @@ func InitMysql(dsn string) {
 	//设置闲置连接数
 	db.DB().SetMaxIdleConns(20)
 	//db.LogMode(true)
+	db.AutoMigrate(&User{})
 }

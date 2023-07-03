@@ -8,13 +8,11 @@ import (
 )
 
 func main() {
-	InitMysql("127.0.0.1:3306")
+	InitConfig()
+	InitMysql(Config.Mysql)
 	aoi.InitMapWorld(map[int32]aoi.MapData{
-		1: aoi.MapData{},
-		2: aoi.MapData{},
-		3: aoi.MapData{},
-		4: aoi.MapData{},
-		5: aoi.MapData{},
+		1: {212, 392, 267, 423, 30, 30, 340, 88, 280, 0},
+		2: {-116, 0, -54, 83, 30, 30, -40, 0, -30, 0},
 	})
 	aoi.NotifyMove = func(player *aoi.Player, pos aoi.PosMessage) {
 		if value, ok := player.GetProperty("from"); ok {
@@ -53,16 +51,17 @@ func main() {
 	InitChatMgr()
 
 	hub := nethub.New(&nethub.HubOptions{
-		HeartbeatTimeout: 15,
-		WaitTimeout:      10,
-		RetryInterval:    10,
+		HeartbeatInterval: 0,
+		HeartbeatTimeout:  0,
+		WaitTimeout:       10,
+		RetryInterval:     10,
 	})
 
 	tcpService := InitTcpService()
 	udpService := InitUdpService()
 
 	hub.ListenAndServeTcp(":8998", 1, nethub.WithHandlerMgr(tcpService), nethub.WithCodec(&codec{}))
-	hub.ListenAndServeUdp(":8999", 5, nethub.WithHandlerMgr(udpService), nethub.WithCodec(&codec{}))
+	hub.ListenAndServeUdp(":8999", 1, nethub.WithHandlerMgr(udpService), nethub.WithCodec(&codec{}))
 
 	select {}
 }

@@ -5,11 +5,13 @@ import (
 )
 
 type User struct {
-	Id int64
+	UserId int64 `gorm:"primary_key"`
 	//
 	LastMapId int32
 	//位置
-	LastPosition []float32
+	LastPositionX float32
+	LastPositionY float32
+	LastPositionZ float32
 	//朝向
 	LastYaw float32
 	//积分
@@ -18,7 +20,7 @@ type User struct {
 
 func SqlFindUser(userId int64) (*User, bool, error) {
 	var record User
-	result := db.Table("User").Where("id = ?", userId).Take(&record)
+	result := db.Table("users").Where("user_id = ?", userId).Take(&record)
 	if result.RecordNotFound() {
 		return nil, false, nil
 	}

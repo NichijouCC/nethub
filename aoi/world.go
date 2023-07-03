@@ -14,7 +14,7 @@ func InitMapWorld(data map[int32]MapData) {
 }
 
 type MapData struct {
-	minX, maxX, minY, maxY, gridX, gridY, initX, initY, initZ, initYaw float32
+	MinX, MaxX, MinZ, MaxZ, GridX, GridZ, InitX, InitY, InitZ, InitYaw float32
 }
 
 func (m *MapWorld) FindMap(mapId int32) *Map {

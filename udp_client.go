@@ -71,6 +71,7 @@ func (n *UdpClient) StartReadWrite() {
 			case <-n.ctx.Done():
 				return
 			case data := <-n.txQueue:
+				//log.Println("udp write", len(data), data)
 				if _, err := n.Conn.Write(data); err != nil {
 					log.Println(fmt.Sprintf(`udp write error:%v`, err.Error()))
 					n.OnError.RiseEvent(err)
@@ -82,13 +83,12 @@ func (n *UdpClient) StartReadWrite() {
 }
 
 func (n *UdpClient) SendMessage(msg []byte) error {
-	log.Println(string(msg))
-	n.txQueue <- []byte(fmt.Sprintf("%v@%v", string(msg), n.sessionId))
+	n.txQueue <- msg
 	return nil
 }
 
 func (n *UdpClient) SendMessageDirect(msg []byte) error {
-	_, err := n.Conn.Write([]byte(fmt.Sprintf("%v@%v", string(msg), n.sessionId)))
+	_, err := n.Conn.Write(msg)
 	return err
 }
 
@@ -161,8 +161,8 @@ func DialUdp(addr string) (*UdpClient, error) {
 }
 
 func DialHubUdp(addr string, params LoginParams, opts *ClientOptions) *Client {
-	var client = newClient(nil, opts)
-	client.beClient.Store(true)
+	var client = NewClient(nil, opts)
+	client.BeClient.Store(true)
 	var tryConn func()
 	tryConn = func() {
 		logger.Info("Try进行udp连接..", zap.Any("addr", addr))
@@ -173,7 +173,7 @@ func DialHubUdp(addr string, params LoginParams, opts *ClientOptions) *Client {
 			go tryConn()
 			return
 		}
-		client.conn = conn
+		client.Conn = conn
 		conn.OnDisconnect.AddEventListener(func(data interface{}) {
 			logger.Info("udp断开连接")
 			client.ClearAllSubTopics()
@@ -181,7 +181,7 @@ func DialHubUdp(addr string, params LoginParams, opts *ClientOptions) *Client {
 			go tryConn()
 		})
 		conn.OnMessage.AddEventListener(func(data interface{}) {
-			client.receiveMessage(data.([]byte))
+			client.ReceiveMessage(data.([]byte))
 		})
 		conn.StartReadWrite()
 		for {

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
+	"log"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -34,7 +36,8 @@ type ClientOptions struct {
 	//加密
 	Crypto *Crypto
 	//登录
-	NeedLogin bool
+	NeedLogin  bool
+	HandlerMgr *HandlerMgr
 }
 
 type clientState string
@@ -54,19 +57,19 @@ type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	//是否是客户端
-	beClient atomic.Bool
+	BeClient atomic.Bool
 	ClientId string
 	//hub               *Hub
 	Group             atomic.Pointer[Group]
 	GroupId           int64
-	conn              IConn
+	Conn              IConn
 	OnReady           *EventTarget
 	OnDispose         *EventTarget
 	OnPingHandler     func(pkt *PingPacket)
 	OnPongHandler     func(pkt *PongPacket)
 	beDisposed        atomic.Bool
 	beExchangedSecret atomic.Bool
-	beLogin           atomic.Bool
+	BeLogin           atomic.Bool
 
 	rxQueue        chan *Packet
 	lastRxTime     atomic.Value
@@ -97,7 +100,7 @@ var RxQueueLen = 100
 // 客户端发布队列大小
 var ClientPubChLen = 1000
 
-func newClient(conn IConn, opts *ClientOptions) *Client {
+func NewClient(conn IConn, opts *ClientOptions) *Client {
 	ctx, cancel := context.WithCancel(context.Background())
 	if opts.PacketCodec == nil {
 		opts.PacketCodec = defaultCodec
@@ -111,20 +114,20 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 	cli := &Client{
 		ctx:           ctx,
 		cancel:        cancel,
-		beClient:      atomic.Bool{},
+		BeClient:      atomic.Bool{},
 		ClientId:      opts.ClientId,
-		conn:          conn,
+		Conn:          conn,
 		OnReady:       newEventTarget(),
 		OnDispose:     newEventTarget(),
 		lastRxTime:    atomic.Value{},
 		packetHandler: map[PacketTypeCode]func(pkt *Packet){},
 		rxQueue:       make(chan *Packet, RxQueueLen),
-		HandlerMgr:    &HandlerMgr{},
+		HandlerMgr:    opts.HandlerMgr,
 		PubSub:        newPubSub(ctx, ClientPubChLen),
 		options:       opts,
 		GroupId:       opts.GroupId,
 	}
-	cli.beClient.Store(false)
+	cli.BeClient.Store(false)
 	cli.lastRxTime.Store(time.Now())
 	//包处理
 	cli.packetHandler[REQUEST_PACKET] = cli.onReceiveRequest
@@ -174,10 +177,10 @@ func newClient(conn IConn, opts *ClientOptions) *Client {
 						cli.SendPacket(&heartbeat)
 					}
 
-					if cli.beClient.Load() {
+					if cli.BeClient.Load() {
 						if cli.options.HeartbeatTimeout != 0 && time.Now().Sub(cli.lastRxTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000) {
 							logger.Warn(fmt.Sprintf("[%v]超时无数据,断开连接.", cli.ClientId))
-							cli.conn.Close()
+							cli.Conn.Close()
 						}
 					} else { //超时无心跳,释放client
 						if cli.options.HeartbeatTimeout != 0 && time.Now().Sub(cli.lastRxTime.Load().(time.Time)) > time.Millisecond*time.Duration(cli.options.HeartbeatTimeout*1000) {
@@ -206,7 +209,7 @@ func (m *Client) SetProperty(property string, value interface{}) {
 	m.properties.Store(property, value)
 }
 
-func (m *Client) receiveMessage(rawData []byte) {
+func (m *Client) ReceiveMessage(rawData []byte) {
 	payload, err := m.options.PacketCodec.Unmarshal(rawData, m.options.Crypto)
 	if err != nil {
 		logger.Error("net通信包解析出错", zap.Any("rawData", string(rawData)))
@@ -231,7 +234,7 @@ func (m *Client) receiveMessage(rawData []byte) {
 			return
 		}
 	}
-	if m.options.NeedLogin && !m.beLogin.Load() {
+	if m.options.NeedLogin && !m.BeLogin.Load() {
 		switch payload.TypeCode() {
 		case REQUEST_PACKET:
 			if payload.(*RequestPacket).Method != EXCHANGE_SECRET && payload.(*RequestPacket).Method != LOGIN {
@@ -250,20 +253,20 @@ func (m *Client) receiveMessage(rawData []byte) {
 }
 
 func (m *Client) BeConnected() bool {
-	if m.conn == nil {
+	if m.Conn == nil {
 		return false
 	}
-	return !m.conn.IsClosed()
+	return !m.Conn.IsClosed()
 }
 
 func (m *Client) BeReady() bool {
-	if m.conn.IsClosed() {
+	if m.Conn.IsClosed() {
 		return false
 	}
 	if m.options.Crypto != nil && !m.beExchangedSecret.Load() {
 		return false
 	}
-	if m.options.NeedLogin && !m.beLogin.Load() {
+	if m.options.NeedLogin && !m.BeLogin.Load() {
 		return false
 	}
 	return true
@@ -300,14 +303,14 @@ func (m *Client) onReceiveRequest(pkt *Packet) {
 								m.OnReady.RiseEvent(nil)
 							}
 						case LOGIN:
-							m.beLogin.Store(true)
+							m.BeLogin.Store(true)
 							m.OnReady.RiseEvent(nil)
 						}
 					}
 				}
 				err := m.SendPacketWithRetry(resp)
 				if err != nil {
-					logger.Error("发送response出错", zap.String("clientId", m.ClientId), zap.String("From", m.conn.RemoteAddr().String()), zap.Error(err))
+					logger.Error("发送response出错", zap.String("clientId", m.ClientId), zap.String("From", m.Conn.RemoteAddr().String()), zap.Error(err))
 				}
 
 			}()
@@ -490,7 +493,9 @@ func (m *Client) Request(method string, params []byte) (interface{}, error) {
 				return request.result, request.err
 			case <-timeout:
 				request.err = fmt.Errorf("超时未接收到RequestAck或者Response回复,reqId=%v", pkt.GetId())
-				close(request.resultBack)
+				if _, loaded = m.pendingResp.LoadAndDelete(pkt.Id); loaded {
+					close(request.resultBack)
+				}
 				return nil, request.err
 			}
 		}
@@ -644,13 +649,13 @@ func (m *Client) StreamRequest(method string, params []byte, execute func(stream
 func (m *Client) SendMessage(message []byte) error {
 	m.lastTxTime.Store(time.Now())
 	//logger.Info(fmt.Sprintf("[%v]Send:%v", m.ClientId, string(message)))
-	return m.conn.SendMessage(message)
+	return m.Conn.SendMessage(message)
 }
 
 func (m *Client) SendMessageDirect(message []byte) error {
 	m.lastTxTime.Store(time.Now())
 	//logger.Info(fmt.Sprintf("[%v]Send:%v", m.ClientId, string(message)))
-	return m.conn.SendMessageDirect(message)
+	return m.Conn.SendMessageDirect(message)
 }
 
 func (m *Client) SendPacket(packet INetPacket) error {
@@ -695,7 +700,7 @@ func (m *Client) Login(params *LoginParams) error {
 	data, _ := json.Marshal(params)
 	_, err := m.Request("login", data)
 	if err == nil {
-		m.beLogin.Store(true)
+		m.BeLogin.Store(true)
 		m.OnReady.RiseEvent(nil)
 	}
 	return err
@@ -708,8 +713,8 @@ func (m *Client) Dispose() {
 	m.beDisposed.Store(true)
 	m.cancel()
 	m.ClearAllSubTopics()
-	logger.Info("客户端释放", zap.String("clientId", m.ClientId), zap.String("from", m.conn.RemoteAddr().String()))
-	m.conn.Close()
+	logger.Info("客户端释放", zap.String("clientId", m.ClientId), zap.String("from", m.Conn.RemoteAddr().String()))
+	m.Conn.Close()
 	currentGroup := m.Group.Load()
 	if currentGroup != nil {
 		currentGroup.RemoveClient(m)
@@ -774,7 +779,8 @@ func (r requestHandler) execute(req *RequestPacket, client *Client) ([]byte, err
 		defer func() {
 			if err := recover(); err != nil {
 				executeErr = err.(error)
-				fmt.Println("rpc execute exception:", err)
+				log.Println(debug.Stack())
+				log.Println("rpc execute exception:", err)
 			}
 		}()
 		result, executeErr = r(req, client)

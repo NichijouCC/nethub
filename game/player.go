@@ -49,9 +49,9 @@ func (p *PlayerManager) InitUser(id int64, from *nethub.Client) (*MapPlayer, err
 	if err != nil {
 		return nil, err
 	}
-	player := aoi.NewPlayer(record.Id)
+	player := aoi.NewPlayer(id)
 	if loaded {
-		player.EnterMap(record.LastMapId, record.LastPosition[0], record.LastPosition[1], record.LastPosition[2], record.LastYaw)
+		player.EnterMap(record.LastMapId, record.LastPositionX, record.LastPositionY, record.LastPositionZ, record.LastYaw)
 	} else {
 		player.EnterMapByInitPos(1)
 	}

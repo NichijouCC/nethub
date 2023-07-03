@@ -56,9 +56,13 @@ func (p *Player) EnterMap(mapId int32, x float32, y float32, z float32, yaw floa
 		p.LeaveMap()
 	}
 	p.CurrentMap = World.maps[mapId]
-	p.CurrentGrid = p.CurrentMap.GetGridByPos(x, y)
+	p.x = x
+	p.y = y
+	p.z = z
+	p.yaw = yaw
+	p.CurrentGrid = p.CurrentMap.GetGridByPos(x, z)
 	p.CurrentGrid.AddPlayer(p)
-	p.AroundGrids = p.CurrentMap.GetAroundGridsByPos(x, y)
+	p.AroundGrids = p.CurrentMap.GetAroundGridsByPos(x, z)
 	if NotifyMove != nil {
 		for _, grid := range p.AroundGrids {
 			grid.Players.Range(func(key, value any) bool {
