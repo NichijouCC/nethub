@@ -130,7 +130,7 @@ func (n *Hub) ListenAndServeUdp(addr string, listenerCount int, opts ...HubServe
 		if value, loaded := addrToClient.Load(addr.String()); loaded {
 			client = value.(*Client)
 		} else {
-			client = newClient(&fakeUdpConn{Addr: addr, listener: lis}, &ClientOptions{
+			client = NewClient(&fakeUdpConn{Addr: addr, listener: lis}, &ClientOptions{
 				DisconnectTimeout: n.options.DisconnectTimeout,
 				HeartbeatTimeout:  n.options.HeartbeatTimeout,
 				HeartbeatInterval: n.options.HeartbeatInterval,
@@ -139,9 +139,9 @@ func (n *Hub) ListenAndServeUdp(addr string, listenerCount int, opts ...HubServe
 				PacketCodec:       options.Codec,
 				Crypto:            options.Crypto,
 				NeedLogin:         options.NeedLogin,
+				HandlerMgr:        options.handlerMgr,
 			})
 			//client.hub = n
-			client.HandlerMgr = n.options.handlerMgr
 			if client.BeReady() {
 				n.AddClient(client)
 			}
@@ -155,7 +155,7 @@ func (n *Hub) ListenAndServeUdp(addr string, listenerCount int, opts ...HubServe
 			value, _ = addrToClient.LoadOrStore(addr.String(), client)
 			client = value.(*Client)
 		}
-		client.receiveMessage(rawData)
+		client.ReceiveMessage(rawData)
 	}
 	udp.ListenAndServe(listenerCount)
 }
@@ -174,7 +174,7 @@ func (n *Hub) ListenAndServeTcp(addr string, listenerCount int, opts ...HubServe
 	//tcp Server
 	tcp := NewTcpServer(addr, options.ServerOpts...)
 	tcp.OnClientConnect = func(conn *TcpConn) {
-		client := newClient(conn, &ClientOptions{
+		client := NewClient(conn, &ClientOptions{
 			DisconnectTimeout: n.options.DisconnectTimeout,
 			HeartbeatTimeout:  n.options.HeartbeatTimeout,
 			HeartbeatInterval: n.options.HeartbeatInterval,
@@ -183,9 +183,9 @@ func (n *Hub) ListenAndServeTcp(addr string, listenerCount int, opts ...HubServe
 			PacketCodec:       options.Codec,
 			Crypto:            options.Crypto,
 			NeedLogin:         options.NeedLogin,
+			HandlerMgr:        options.handlerMgr,
 		})
 		//client.hub = n
-		client.HandlerMgr = options.handlerMgr
 		if client.BeReady() {
 			n.AddClient(client)
 		}
@@ -194,7 +194,7 @@ func (n *Hub) ListenAndServeTcp(addr string, listenerCount int, opts ...HubServe
 		})
 
 		conn.ListenToOnMessage(func(data interface{}) {
-			client.receiveMessage(data.([]byte))
+			client.ReceiveMessage(data.([]byte))
 		})
 		conn.ListenToOnDisconnect(func(i interface{}) {
 			client.ClearAllSubTopics()
@@ -228,6 +228,7 @@ func (n *Hub) ListenAndServeWebsocket(addr string, opts ...HubServerOption) *Web
 			PacketCodec:       options.Codec,
 			Crypto:            options.Crypto,
 			NeedLogin:         options.NeedLogin,
+			HandlerMgr:        options.handlerMgr,
 		}
 		cliOpts.ClientId = conn.UrlParams["client_id"]
 		groupIdStr := conn.UrlParams["bucket_id"]
@@ -235,9 +236,8 @@ func (n *Hub) ListenAndServeWebsocket(addr string, opts ...HubServerOption) *Web
 			groupId, _ := strconv.ParseInt(groupIdStr, 10, 64)
 			cliOpts.GroupId = groupId
 		}
-		client := newClient(conn, cliOpts)
+		client := NewClient(conn, cliOpts)
 		//client.hub = n
-		client.HandlerMgr = options.handlerMgr
 		if client.BeReady() {
 			n.AddClient(client)
 		}
@@ -246,7 +246,7 @@ func (n *Hub) ListenAndServeWebsocket(addr string, opts ...HubServerOption) *Web
 		})
 
 		conn.ListenToOnMessage(func(data interface{}) {
-			client.receiveMessage(data.([]byte))
+			client.ReceiveMessage(data.([]byte))
 		})
 		conn.ListenToOnDisconnect(func(i interface{}) {
 			client.ClearAllSubTopics()
@@ -292,7 +292,7 @@ func (n *Hub) FindClient(id string) (*Client, bool) {
 func (n *Hub) AddClient(new *Client) {
 	if value, loaded := n.clients.Load(new.ClientId); loaded {
 		if value.(*Client) != new {
-			logger.Error(fmt.Sprintf("clientId【%v】已连接,关闭旧连接[%v]", new.ClientId, new.conn.RemoteAddr()))
+			logger.Error(fmt.Sprintf("clientId【%v】已连接,关闭旧连接[%v]", new.ClientId, new.Conn.RemoteAddr()))
 			value.(*Client).Dispose()
 			n.clients.Store(new.ClientId, new)
 
@@ -308,7 +308,7 @@ func (n *Hub) AddClient(new *Client) {
 			})
 		}
 	} else {
-		logger.Info("hub新增加客户端", zap.String("clientId", new.ClientId), zap.String("协议", new.conn.Type()), zap.String("addr", new.conn.RemoteAddr().String()))
+		logger.Info("hub新增加客户端", zap.String("clientId", new.ClientId), zap.String("协议", new.Conn.Type()), zap.String("addr", new.Conn.RemoteAddr().String()))
 		n.clients.Store(new.ClientId, new)
 		if new.GroupId != 0 {
 			group := n.FindOrCreateGroup(new.GroupId)

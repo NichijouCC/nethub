@@ -29,7 +29,7 @@ type Request struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Id     string `protobuf:"bytes,1,opt,name=Id,proto3" json:"Id,omitempty"`
+	Id     string `protobuf:"bytes,1,opt,name=UserId,proto3" json:"UserId,omitempty"`
 	Method int32  `protobuf:"varint,2,opt,name=Method,proto3" json:"Method,omitempty"`
 	Params []byte `protobuf:"bytes,3,opt,name=Params,proto3" json:"Params,omitempty"`
 }
@@ -92,7 +92,7 @@ type Response struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Id     string `protobuf:"bytes,1,opt,name=Id,proto3" json:"Id,omitempty"`
+	Id     string `protobuf:"bytes,1,opt,name=UserId,proto3" json:"UserId,omitempty"`
 	Result []byte `protobuf:"bytes,2,opt,name=Result,proto3" json:"Result,omitempty"`
 	Error  string `protobuf:"bytes,3,opt,name=Error,proto3" json:"Error,omitempty"`
 }
@@ -155,7 +155,7 @@ type Ack struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Id string `protobuf:"bytes,1,opt,name=Id,proto3" json:"Id,omitempty"`
+	Id string `protobuf:"bytes,1,opt,name=UserId,proto3" json:"UserId,omitempty"`
 }
 
 func (x *Ack) Reset() {

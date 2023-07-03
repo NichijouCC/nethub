@@ -6,8 +6,8 @@ import (
 )
 
 func DialHubTcp(addr string, params LoginParams, opts *ClientOptions) *Client {
-	var client = newClient(nil, opts)
-	client.beClient.Store(true)
+	var client = NewClient(nil, opts)
+	client.BeClient.Store(true)
 
 	var tryConn func()
 	tryConn = func() {
@@ -19,9 +19,9 @@ func DialHubTcp(addr string, params LoginParams, opts *ClientOptions) *Client {
 			go tryConn()
 			return
 		}
-		client.conn = conn
+		client.Conn = conn
 		conn.OnMessage.AddEventListener(func(data interface{}) {
-			client.receiveMessage(data.([]byte))
+			client.ReceiveMessage(data.([]byte))
 		})
 		conn.OnDisconnect.AddEventListener(func(data interface{}) {
 			logger.Error("Tcp断连.....")

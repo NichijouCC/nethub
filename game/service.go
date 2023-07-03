@@ -130,6 +130,7 @@ func InitUdpService() *nethub.HandlerMgr {
 		resp.Position = player.Ins.GetPosition()
 		resp.Yaw = player.Ins.GetYaw()
 		resp.MapId = player.Ins.CurrentMap.Id
+		from.BeLogin.Store(true)
 		data, err := proto.Marshal(&resp)
 		if err != nil {
 			return nil, errors.New("RESP参数编码失败")

@@ -89,9 +89,9 @@ func TestBroadcastToAround(t *testing.T) {
 func TestRtMessage(t *testing.T) {
 	var clients []*Client
 	for i := 1; i < 2; i++ {
-		//conn, err := net.Dial("udp", "139.196.75.44:1234")
+		//Conn, err := net.Dial("udp", "139.196.75.44:1234")
 		//Session, err := net.Dial("udp", "192.168.9.86:1234")
-		//conn, err := net.Dial("udp", "106.14.223.60:1234")
+		//Conn, err := net.Dial("udp", "106.14.223.60:1234")
 		var projectId int64 = 53010217439105
 		client := DialHubUdp("139.196.75.44:1234", LoginParams{ClientId: "T_001", BucketId: &projectId}, &ClientOptions{
 			HeartbeatInterval: 5,

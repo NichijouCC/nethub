@@ -6,8 +6,8 @@ import (
 )
 
 func DialHubWebsocket(addr string, params LoginParams, opts *ClientOptions) *Client {
-	var client = newClient(nil, opts)
-	client.beClient.Store(true)
+	var client = NewClient(nil, opts)
+	client.BeClient.Store(true)
 
 	var tryConn func()
 	tryConn = func() {
@@ -19,9 +19,9 @@ func DialHubWebsocket(addr string, params LoginParams, opts *ClientOptions) *Cli
 			go tryConn()
 			return
 		}
-		client.conn = ws
+		client.Conn = ws
 		ws.OnMessage.AddEventListener(func(data interface{}) {
-			client.receiveMessage(data.([]byte))
+			client.ReceiveMessage(data.([]byte))
 		})
 		ws.OnDisconnect.AddEventListener(func(data interface{}) {
 			logger.Error("websocket断连.....")

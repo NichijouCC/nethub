@@ -6,23 +6,23 @@ type Grid struct {
 	Id      int
 	MinX    float32
 	MaxX    float32
-	MinY    float32
-	MaxY    float32
+	MinZ    float32
+	MaxZ    float32
 	Players sync.Map
 }
 
-func NewGrid(gId int, minX, maxX, minY, maxY float32) *Grid {
+func NewGrid(gId int, minX, maxX, minZ, maxZ float32) *Grid {
 	return &Grid{
 		Id:   gId,
 		MinX: minX,
 		MaxX: maxX,
-		MinY: minY,
-		MaxY: maxY,
+		MinZ: minZ,
+		MaxZ: maxZ,
 	}
 }
 
 func (g *Grid) AddPlayer(player *Player) {
-	g.Players.Store(player.Id, struct{}{})
+	g.Players.Store(player.Id, player)
 }
 
 func (g *Grid) RemovePlayer(PlayerId int64) {
