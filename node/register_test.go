@@ -9,7 +9,7 @@ func TestRegister(t *testing.T) {
 	register := NewEtcdRegister([]string{"127.0.0.1:2379"})
 	register.Register(&Service{
 		Name:    "test",
-		Index:   1,
+		Id:      1,
 		Address: "127.0.0.1:8088",
 	})
 }

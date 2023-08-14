@@ -46,7 +46,7 @@ func (e *EtcdRegister) Register(service *Service) {
 			defer lease.Revoke(context.TODO(), leaseId)
 
 			data, _ := json.Marshal(service)
-			_, err = e.client.Put(e.ctx, e.serviceKey(service.Name, service.Index), string(data), clientv3.WithLease(leaseId))
+			_, err = e.client.Put(e.ctx, e.serviceKey(service.Name, service.Id), string(data), clientv3.WithLease(leaseId))
 			if err != nil {
 				fmt.Println("etcd put key-value err", err.Error())
 				time.Sleep(time.Second)
@@ -73,8 +73,8 @@ func (e *EtcdRegister) servicePrefix(name string) string {
 	return fmt.Sprintf("/register/%v", name)
 }
 
-func (e *EtcdRegister) serviceKey(name string, index int) string {
-	return fmt.Sprintf("/register/%v/%v", name, index)
+func (e *EtcdRegister) serviceKey(name string, id string) string {
+	return fmt.Sprintf("/register/%v/%v", name, id)
 }
 
 func (e *EtcdRegister) WatchService(name string) chan struct{} {

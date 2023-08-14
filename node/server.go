@@ -2,73 +2,53 @@ package node
 
 import (
 	"fmt"
+	"github.com/NichijouCC/nethub/node/util"
 	"log"
 )
 
 type Server struct {
 	*GrpcServer
-	voter       *LeaderVoter
-	appName     string
-	appIndex    int
-	appConfig   *AppConfig
-	appEndpoint *AppEndPoint
-	Opts        ServerOptions
+	ServiceName   string
+	ServiceId     string
+	BalancePolicy BALANCE_POLICY
+	EndPoint      EndPoint
+	Register      IRegister
+	ToMain        *util.MainServiceMgr
 }
 
 type ServerOptions struct {
-	Register IRegister
-	Voter    *LeaderVoter
-}
-
-type ServerOption func(opts *ServerOptions)
-
-func WithRegister(register IRegister) ServerOption {
-	return func(opts *ServerOptions) { opts.Register = register }
+	ServiceName   string
+	ServiceId     string
+	BalancePolicy BALANCE_POLICY
+	EndPoint      EndPoint
+	Register      IRegister
+	ToMain        *util.MainServiceMgr
 }
 
 type Service struct {
 	Name    string `json:"name"`
-	Index   int    `json:"index"`
+	Id      string `json:"id"`
 	Address string `json:"address"`
 }
 
-func NewServer(config *Config, appName string, appIndex int, opts ...ServerOption) *Server {
-	appConfig := config.Apps[appName]
-	endpoint := appConfig.Endpoints[appIndex]
-	if appConfig == nil {
-		log.Fatalln("APP SERVER初始失败,配置为空", appName)
-	}
-
-	var options ServerOptions
-	for _, opt := range opts {
-		opt(&options)
-	}
-
-	if options.Register == nil {
-		options.Register = NewEtcdRegister(config.RegisterAdders)
-	}
-
+func NewServer(opts ServerOptions) *Server {
 	ser := &Server{
-		GrpcServer:  NewGrpcServer(),
-		appName:     appName,
-		appIndex:    appIndex,
-		appConfig:   appConfig,
-		appEndpoint: endpoint,
-		Opts:        options,
+		GrpcServer:    NewGrpcServer(),
+		ServiceName:   opts.ServiceName,
+		ServiceId:     opts.ServiceId,
+		BalancePolicy: opts.BalancePolicy,
+		EndPoint:      opts.EndPoint,
+		Register:      opts.Register,
+		ToMain:        opts.ToMain,
 	}
-
-	if appConfig.BalancePolicy == BALANCE_SINGLE {
-		ser.voter = NewLeaderVoter(config.VoteAdders, appName, appIndex)
-	}
-
 	return ser
 }
 
 func (s *Server) Start() error {
-	go s.Opts.Register.Register(&Service{Name: s.appName, Index: s.appIndex, Address: fmt.Sprintf("%v:%v", s.appEndpoint.Ip, s.appEndpoint.Port)})
-	if s.appConfig.BalancePolicy == BALANCE_SINGLE {
-		go s.voter.StartVote()
+	go s.Register.Register(&Service{Name: s.ServiceName, Id: s.ServiceId, Address: fmt.Sprintf("%v:%v", s.EndPoint.Ip, s.EndPoint.Port)})
+	if s.BalancePolicy == BALANCE_TO_MAIN {
+		go s.ToMain.StartVote(s.ServiceName, s.ServiceId)
 	}
-	log.Printf("启动服务节点,%v-%v", s.appName, s.appIndex)
-	return s.GrpcServer.listenAndServer(s.appEndpoint.Port)
+	log.Printf("启动服务节点,%v-%v", s.ServiceName, s.ServiceId)
+	return s.GrpcServer.listenAndServer(s.EndPoint.Port)
 }

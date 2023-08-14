@@ -5,7 +5,6 @@ import (
 	"google.golang.org/grpc"
 	"log"
 	"net"
-	"sync"
 )
 
 type GrpcServer struct {
@@ -13,8 +12,6 @@ type GrpcServer struct {
 	server       *grpc.Server
 	interceptors []grpc.UnaryServerInterceptor
 	services     []registerService
-
-	clients sync.Map
 }
 
 type registerService struct {

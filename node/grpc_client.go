@@ -3,40 +3,27 @@ package node
 import (
 	"context"
 	"fmt"
+	balancer2 "github.com/NichijouCC/nethub/node/balancer"
+	"github.com/NichijouCC/nethub/node/util"
 	"github.com/pkg/errors"
-	"github.com/serialx/hashring"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/attributes"
-	"google.golang.org/grpc/balancer"
-	"google.golang.org/grpc/balancer/base"
+	"google.golang.org/grpc/balancer/roundrobin"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/resolver"
 	"log"
-	"math/rand"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
-const (
-	balanceAttrKey       = "balance_attr_key"
-	schemeKey            = "router"
-	metaBalancePolicyKey = "meta_balance_policy"
-	metaSingleId         = "meta_single_id"
-
-	balancePolicy     = "pipi_balance_policy"
-	BalanceRoundRobin = "balance_round_robin"
-	BalanceRandom     = "balance_random"
-	BalanceSingle     = "balance_single"
-)
+const schemeKey = "router"
 
 type BALANCE_POLICY string
 
 var (
-	BALANCE_ROUND_ROBIN BALANCE_POLICY = "balance_round_robin"
-	BALANCE_RANDOM      BALANCE_POLICY = "balance_random"
-	BALANCE_SINGLE      BALANCE_POLICY = "balance_single"
+	BALANCE_ROUND_ROBIN BALANCE_POLICY = roundrobin.Name
+	BALANCE_TO_MAIN     BALANCE_POLICY = balancer2.ToMain
 )
 
 type resolverBuilder struct {
@@ -64,7 +51,7 @@ func (g *resolverBuilder) Build(target resolver.Target, cc resolver.ClientConn, 
 			for _, instance := range instances {
 				newAddrs = append(newAddrs, resolver.Address{
 					Addr:               instance.Address,
-					BalancerAttributes: attributes.New(balanceAttrKey, instance.Index),
+					BalancerAttributes: attributes.New(balancer2.BALANCE_ATT_ID, instance.Id),
 				})
 			}
 			cc.UpdateState(resolver.State{Addresses: newAddrs})
@@ -87,108 +74,55 @@ func (g *schemeResolver) ResolveNow(options resolver.ResolveNowOptions) {
 func (g *schemeResolver) Close() {
 }
 
-type balancePickerBuilder struct {
-}
-
-func (b *balancePickerBuilder) Build(info base.PickerBuildInfo) balancer.Picker {
-	if len(info.ReadySCs) == 0 {
-		return base.NewErrPicker(balancer.ErrNoSubConnAvailable)
-	}
-	subConns := make(map[string]balancer.SubConn)
-	var subConnList []balancer.SubConn
-	var idList []string
-	for subConn, conInfo := range info.ReadySCs {
-		v := conInfo.Address.BalancerAttributes.Value(balanceAttrKey)
-		if v == nil {
-			continue
-		}
-		id := fmt.Sprintf("%v", v)
-		subConns[id] = subConn
-		subConnList = append(subConnList, subConn)
-		idList = append(idList, id)
-	}
-	return &balancePicker{subConnDic: subConns, subConns: subConnList, hashRing: hashring.New(idList)}
-}
-
-type balancePicker struct {
-	subConnDic map[string]balancer.SubConn
-	subConns   []balancer.SubConn
-	hashRing   *hashring.HashRing
-	next       uint32
-}
-
-func (b *balancePicker) Pick(info balancer.PickInfo) (balancer.PickResult, error) {
-	data, ok := metadata.FromOutgoingContext(info.Ctx)
-	if !ok {
-		return balancer.PickResult{}, balancer.ErrNoSubConnAvailable
-	}
-	balanceType := data[metaBalancePolicyKey]
-	if len(balanceType) != 1 {
-		return balancer.PickResult{}, balancer.ErrNoSubConnAvailable
-	}
-	switch balanceType[0] {
-	case BalanceRandom:
-		return balancer.PickResult{SubConn: b.subConns[rand.Intn(len(b.subConns))]}, nil
-	case BalanceRoundRobin:
-		nextIndex := atomic.AddUint32(&b.next, 1)
-		return balancer.PickResult{SubConn: b.subConns[nextIndex%uint32(len(b.subConns))]}, nil
-	default:
-		return balancer.PickResult{}, fmt.Errorf("未知路由类型[%v]", balanceType[0])
-	}
-}
-
 type GrpcClient struct {
+	serviceName   string
 	conn          *grpc.ClientConn
 	interceptors  []grpc.UnaryClientInterceptor
 	balancePolicy BALANCE_POLICY
+	toMainMgr     *util.MainServiceMgr
 	policyInit    sync.Once
 	resolver      *resolverBuilder
 }
 
-var balancerInit sync.Once
-
-func NewGrpcClient(register IRegister) *GrpcClient {
+func NewGrpcClient(serviceName string, register IRegister) *GrpcClient {
 	client := &GrpcClient{
-		balancePolicy: BalanceRoundRobin,
+		serviceName:   serviceName,
+		balancePolicy: roundrobin.Name,
 		resolver:      newResolverBuilder(register),
+		interceptors: []grpc.UnaryClientInterceptor{func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+			metadata.AppendToOutgoingContext(ctx, balancer2.META_SERVICE_NAME, serviceName)
+			return invoker(ctx, method, req, reply, cc, opts...)
+		}},
 	}
-	balancerInit.Do(func() {
-		balancer.Register(base.NewBalancerBuilder(balancePolicy, &balancePickerBuilder{}, base.Config{HealthCheck: true}))
-	})
 	return client
 }
 
-// 主备服务,设置client均衡策略为single
-func (g *GrpcClient) SetBalanceSingle(watcher *leaderWatcher) {
-	g.policyInit.Do(func() {
-		g.balancePolicy = BalanceSingle
-		g.AddInterceptor(func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-			ctx = metadata.AppendToOutgoingContext(ctx, metaBalancePolicyKey, BalanceSingle, metaSingleId, watcher.MainApp())
-			return nil
-		})
-	})
+// 轮流策略
+func (g *GrpcClient) UseRoundRobinBalancer() {
+	g.balancePolicy = roundrobin.Name
 }
 
-// 设置client均衡策略为随机或者轮流策略
-func (g *GrpcClient) SetBalancePolicy(balancePolicy BALANCE_POLICY) {
-	g.policyInit.Do(func() {
-		g.balancePolicy = balancePolicy
-		g.AddInterceptor(func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-			ctx = metadata.AppendToOutgoingContext(ctx, metaBalancePolicyKey, string(balancePolicy))
-			return invoker(ctx, method, req, reply, cc, opts...)
+// 主备策略
+func (g *GrpcClient) UseToMainBalancer(mgr *util.MainServiceMgr) {
+	g.balancePolicy = balancer2.ToMain
+	go func() {
+		go mgr.StartWatch(g.serviceName)
+		balancer2.InitToMain(func(serviceName string) string {
+			addr, _ := mgr.FindMainServiceId(serviceName)
+			return addr
 		})
-	})
+	}()
 }
 
 func (g *GrpcClient) AddInterceptor(interceptor grpc.UnaryClientInterceptor) {
 	g.interceptors = append(g.interceptors, interceptor)
 }
 
-func (g *GrpcClient) Dial(target string, opts ...grpc.DialOption) (*grpc.ClientConn, error) {
-	targetAddr := fmt.Sprintf("%v://%s", schemeKey, target)
+func (g *GrpcClient) Dial(opts ...grpc.DialOption) (*grpc.ClientConn, error) {
+	targetAddr := fmt.Sprintf("%v://%s", schemeKey, g.serviceName)
 	opts = append(opts,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultServiceConfig(fmt.Sprintf(`{"loadBalancingPolicy":"%v"}`, balancePolicy)),
+		grpc.WithDefaultServiceConfig(fmt.Sprintf(`{"loadBalancingPolicy":"%v"}`, g.balancePolicy)),
 		grpc.WithChainUnaryInterceptor(g.interceptors...),
 		grpc.WithResolvers(g.resolver),
 	)

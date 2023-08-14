@@ -1,13 +1,14 @@
 package node
 
 import (
+	"github.com/NichijouCC/nethub/node/util"
 	"google.golang.org/grpc"
 	"log"
 )
 
 type Client struct {
 	*GrpcClient
-	watcher *leaderWatcher
+	watcher *util.MainServiceMgr
 	appName string
 }
 
@@ -35,17 +36,10 @@ func NewClient(config *Config, appName string, opts ...ClientOption) *Client {
 		options.Register = NewEtcdRegister(config.RegisterAdders)
 	}
 	cli := &Client{appName: appName}
-	cli.GrpcClient = NewGrpcClient(options.Register)
-	if appConfig.BalancePolicy == BALANCE_SINGLE {
-		cli.watcher = NewLeaderWatcher(config.VoteAdders, appName)
-		go cli.watcher.StartWatch()
-		cli.GrpcClient.SetBalanceSingle(cli.watcher)
-	} else {
-		cli.GrpcClient.SetBalancePolicy(appConfig.BalancePolicy)
-	}
+	cli.GrpcClient = NewGrpcClient(appName, options.Register)
 	return cli
 }
 
 func (c *Client) Dial(opts ...grpc.DialOption) (*grpc.ClientConn, error) {
-	return c.GrpcClient.Dial(c.appName, opts...)
+	return c.GrpcClient.Dial(opts...)
 }

@@ -41,12 +41,12 @@ type Config struct {
 }
 
 type AppConfig struct {
-	Endpoints []*AppEndPoint `json:"endpoints"`
+	Endpoints map[string]*EndPoint `json:"endpoints"`
 	//负载均衡方式,包含
 	BalancePolicy BALANCE_POLICY `json:"balance_policy"`
 }
 
-type AppEndPoint struct {
+type EndPoint struct {
 	//服务ip,grpc注册
 	Ip string `json:"ip"`
 	//服务端口,grpc注册
